@@ -1,0 +1,239 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  EVENT_MANAGER
+  CHECK_IN_STAFF
+}
+
+enum EventType {
+  OPEN_DAY
+  WORKSHOP
+  INFORMATION_SESSION
+  GUEST_VISIT
+  MEETUP
+  GRADUATION_CEREMONY
+  OTHER
+}
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  REGISTRATION_CLOSED
+  COMPLETED
+  CANCELLED
+}
+
+enum RegistrationStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  WAITLISTED
+}
+
+enum TicketStatus {
+  VALID
+  CHECKED_IN
+  CANCELLED
+  INVALID
+}
+
+enum EmailType {
+  REGISTRATION_CONFIRMATION
+  WAITLIST_CONFIRMATION
+  EVENT_REMINDER
+  REGISTRATION_CANCELLATION
+  EVENT_CANCELLATION
+  POST_EVENT_THANK_YOU
+  FEEDBACK_REQUEST
+  EVENT_MATERIALS
+}
+
+enum EmailStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum CrmSyncStatus {
+  PENDING
+  SYNCED
+  FAILED
+}
+
+model User {
+  id             String                 @id @default(uuid()) @db.Uuid
+  firstName      String
+  lastName       String
+  email          String                 @unique
+  passwordHash   String
+  role           UserRole               @default(EVENT_MANAGER)
+  isActive       Boolean                @default(true)
+  events         Event[]                @relation("EventOrganizer")
+  checkIns       CheckIn[]
+  assignedEvents EventStaffAssignment[]
+  createdAt      DateTime               @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime               @updatedAt @db.Timestamptz(6)
+
+  @@index([role, isActive])
+}
+
+model Event {
+  id                    String                 @id @default(uuid()) @db.Uuid
+  title                 String
+  slug                  String                 @unique
+  description           String
+  coverImage            String?
+  type                  EventType
+  status                EventStatus            @default(DRAFT)
+  location              String
+  startDate             DateTime               @db.Timestamptz(6)
+  endDate               DateTime               @db.Timestamptz(6)
+  registrationDeadline  DateTime               @db.Timestamptz(6)
+  maxAttendees          Int?
+  organizerId           String                 @db.Uuid
+  organizer             User                   @relation("EventOrganizer", fields: [organizerId], references: [id], onDelete: Restrict)
+  contactEmail          String?
+  seoTitle              String?
+  seoDescription        String?
+  registrationEnabled   Boolean                @default(true)
+  allowSelfCancellation Boolean                @default(true)
+  registrationQuestions Json?
+  reminderOffsetsHours  Int[]                  @default([24, 2])
+  registrations         EventRegistration[]
+  feedback              Feedback[]
+  staffAssignments      EventStaffAssignment[]
+  createdAt             DateTime               @default(now()) @db.Timestamptz(6)
+  updatedAt             DateTime               @updatedAt @db.Timestamptz(6)
+
+  @@index([status, startDate])
+}
+
+model EventRegistration {
+  id                    String             @id @default(uuid()) @db.Uuid
+  eventId               String             @db.Uuid
+  event                 Event              @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  firstName             String
+  lastName              String
+  email                 String
+  normalizedEmail       String
+  cancellationTokenHash String?            @unique
+  phone                 String?
+  organization          String?
+  interestedInPrograms  Boolean?
+  additionalAnswers     Json?
+  status                RegistrationStatus @default(PENDING)
+  marketingConsent      Boolean            @default(false)
+  registeredAt          DateTime           @default(now()) @db.Timestamptz(6)
+  ticket                Ticket?
+  emailLogs             EmailLog[]
+  feedback              Feedback?
+  crmSyncLog            CrmSyncLog?
+
+  @@unique([eventId, normalizedEmail])
+  @@index([eventId, status])
+}
+
+model Ticket {
+  id             String            @id @default(uuid()) @db.Uuid
+  registrationId String            @unique @db.Uuid
+  registration   EventRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  tokenHash      String            @unique
+  status         TicketStatus      @default(VALID)
+  checkIn        CheckIn?
+  createdAt      DateTime          @default(now()) @db.Timestamptz(6)
+}
+
+model CheckIn {
+  id          String   @id @default(uuid()) @db.Uuid
+  ticketId    String   @unique @db.Uuid
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  checkedInBy String   @db.Uuid
+  staff       User     @relation(fields: [checkedInBy], references: [id], onDelete: Restrict)
+  checkedInAt DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([checkedInBy, checkedInAt])
+}
+
+model EmailLog {
+  id                String            @id @default(uuid()) @db.Uuid
+  registrationId    String            @db.Uuid
+  registration      EventRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  templateId        String?           @db.Uuid
+  template          EmailTemplate?    @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  type              EmailType
+  status            EmailStatus       @default(PENDING)
+  idempotencyKey    String?           @unique
+  providerId        String?
+  payloadCiphertext String?
+  attempts          Int               @default(0)
+  scheduledAt       DateTime          @default(now()) @db.Timestamptz(6)
+  lastAttemptAt     DateTime?         @db.Timestamptz(6)
+  sentAt            DateTime?         @db.Timestamptz(6)
+  errorMessage      String?
+  createdAt         DateTime          @default(now()) @db.Timestamptz(6)
+
+  @@index([registrationId, type, status])
+}
+
+model EmailTemplate {
+  id        String     @id @default(uuid()) @db.Uuid
+  type      EmailType  @unique
+  subject   String
+  html      String
+  text      String?
+  isActive  Boolean    @default(true)
+  createdAt DateTime   @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime   @updatedAt @db.Timestamptz(6)
+  emailLogs EmailLog[]
+}
+
+model Feedback {
+  id                   String            @id @default(uuid()) @db.Uuid
+  eventId              String            @db.Uuid
+  event                Event             @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  registrationId       String            @unique @db.Uuid
+  registration         EventRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  overallRating        Int
+  contentRating        Int?
+  organizationRating   Int?
+  comment              String?
+  interestedInPrograms Boolean?
+  submittedAt          DateTime          @default(now()) @db.Timestamptz(6)
+}
+
+model EventStaffAssignment {
+  id         String   @id @default(uuid()) @db.Uuid
+  eventId    String   @db.Uuid
+  event      Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  staffId    String   @db.Uuid
+  staff      User     @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  assignedAt DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([eventId, staffId])
+  @@index([staffId])
+}
+
+model CrmSyncLog {
+  id             String            @id @default(uuid()) @db.Uuid
+  registrationId String            @unique @db.Uuid
+  registration   EventRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  status         CrmSyncStatus     @default(PENDING)
+  contactId      String?
+  leadId         String?
+  errorMessage   String?
+  attempts       Int               @default(0)
+  lastAttemptAt  DateTime?         @db.Timestamptz(6)
+  syncedAt       DateTime?         @db.Timestamptz(6)
+  createdAt      DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime          @updatedAt @db.Timestamptz(6)
+
+  @@index([status, updatedAt])
+}

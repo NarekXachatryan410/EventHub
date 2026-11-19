@@ -1,0 +1,8 @@
+-- AlterTable
+ALTER TABLE "EmailLog" ADD COLUMN "attempts" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN "lastAttemptAt" TIMESTAMPTZ(6),
+ADD COLUMN "payloadCiphertext" TEXT,
+ADD COLUMN "scheduledAt" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP;
+
+-- AlterTable
+ALTER TABLE "Event" ADD COLUMN "allowSelfCancellation" BOOLEAN NOT NULL DEFAULT true;
