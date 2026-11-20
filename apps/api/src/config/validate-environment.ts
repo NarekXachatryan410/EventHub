@@ -1,0 +1,60 @@
+export function validateEnvironment(
+  environment: Record<string, unknown>,
+): Record<string, unknown> {
+  if (environment.NODE_ENV !== 'production') return environment;
+
+  const issues: string[] = [];
+  const jwtSecret = value(environment.JWT_SECRET);
+  const encryptionKey = value(environment.EMAIL_ENCRYPTION_KEY);
+  const databaseUrl = value(environment.DATABASE_URL);
+  const redisUrl = value(environment.REDIS_URL);
+  const webOrigin = value(environment.WEB_ORIGIN);
+
+  if (
+    jwtSecret.length < 32 ||
+    /replace|local-only|change-me/i.test(jwtSecret)
+  ) {
+    issues.push(
+      'JWT_SECRET must be a deployment-specific secret of at least 32 characters',
+    );
+  }
+  if (
+    encryptionKey.length < 32 ||
+    /replace|local-only|change-me/i.test(encryptionKey)
+  ) {
+    issues.push(
+      'EMAIL_ENCRYPTION_KEY must be a separate deployment-specific secret of at least 32 characters',
+    );
+  }
+  if (!/^postgres(ql)?:\/\//i.test(databaseUrl)) {
+    issues.push('DATABASE_URL must point to PostgreSQL');
+  }
+  if (!redisUrl) issues.push('REDIS_URL must be configured');
+  if (
+    !value(environment.RESEND_API_KEY) ||
+    !value(environment.RESEND_FROM_EMAIL)
+  ) {
+    issues.push('Resend API key and verified sender must be configured');
+  }
+  if (!value(environment.RESEND_WEBHOOK_SECRET)) {
+    issues.push(
+      'RESEND_WEBHOOK_SECRET must be configured to track email delivery',
+    );
+  }
+  try {
+    if (new URL(webOrigin).protocol !== 'https:') {
+      issues.push('WEB_ORIGIN must use HTTPS in production');
+    }
+  } catch {
+    issues.push('WEB_ORIGIN must be a valid HTTPS URL');
+  }
+
+  if (issues.length) {
+    throw new Error(`Invalid production configuration: ${issues.join('; ')}`);
+  }
+  return environment;
+}
+
+function value(input: unknown): string {
+  return typeof input === 'string' ? input.trim() : '';
+}

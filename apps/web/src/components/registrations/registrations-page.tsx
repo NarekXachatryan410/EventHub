@@ -6,7 +6,7 @@ import {
   TicketCheck,
   Users,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { staffApi, formatDate, type StaffEvent, type StaffRegistration } from "@/lib/staff-api";
 import { publicApiBaseUrl } from "@/lib/api";
@@ -15,11 +15,18 @@ export function RegistrationsPage() {
   const [events, setEvents] = useState<StaffEvent[]>([]);
   const [eventId, setEventId] = useState("");
   const [registrations, setRegistrations] = useState<StaffRegistration[]>([]);
+  const [total, setTotal] = useState(0);
+  const [eventTotal, setEventTotal] = useState(0);
+  const [confirmedCount, setConfirmedCount] = useState(0);
+  const [checkedInCount, setCheckedInCount] = useState(0);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [loadingEvents, setLoadingEvents] = useState(true);
   const [loadingRegistrations, setLoadingRegistrations] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const requestSequence = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -43,29 +50,64 @@ export function RegistrationsPage() {
 
   const loadRegistrations = useCallback(async () => {
     if (!eventId) return;
+    const sequence = ++requestSequence.current;
+    setLoadingRegistrations(true);
     try {
-      setRegistrations(await staffApi<StaffRegistration[]>(`/events/${eventId}/registrations`));
+      const query = new URLSearchParams({ limit: "50" });
+      if (search.trim()) query.set("search", search.trim());
+      const result = await staffApi<{
+        items: StaffRegistration[];
+        total: number;
+        eventTotal: number;
+        confirmedCount: number;
+        checkedInCount: number;
+        nextCursor: string | null;
+      }>(`/events/${eventId}/registrations/page?${query}`);
+      if (sequence !== requestSequence.current) return;
+      setRegistrations(result.items);
+      setTotal(result.total);
+      setEventTotal(result.eventTotal);
+      setConfirmedCount(result.confirmedCount);
+      setCheckedInCount(result.checkedInCount);
+      setNextCursor(result.nextCursor);
       setError(null);
     } catch (loadError: unknown) {
-      setError(loadError instanceof Error ? loadError.message : "Could not load registrations.");
+      if (sequence === requestSequence.current) {
+        setError(loadError instanceof Error ? loadError.message : "Could not load registrations.");
+      }
     } finally {
-      setLoadingRegistrations(false);
+      if (sequence === requestSequence.current) setLoadingRegistrations(false);
     }
-  }, [eventId]);
+  }, [eventId, search]);
 
   useEffect(() => {
     void Promise.resolve().then(loadRegistrations);
   }, [loadRegistrations]);
 
-  const filtered = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return registrations.filter((registration) =>
-      !term ||
-      `${registration.firstName} ${registration.lastName}`.toLowerCase().includes(term) ||
-      registration.email.toLowerCase().includes(term) ||
-      (registration.organization ?? "").toLowerCase().includes(term),
-    );
-  }, [registrations, search]);
+  async function loadMore() {
+    if (!eventId || !nextCursor) return;
+    const sequence = ++requestSequence.current;
+    setLoadingMore(true);
+    try {
+      const query = new URLSearchParams({ limit: "50", cursor: nextCursor });
+      if (search.trim()) query.set("search", search.trim());
+      const result = await staffApi<{
+        items: StaffRegistration[];
+        total: number;
+        nextCursor: string | null;
+      }>(`/events/${eventId}/registrations/page?${query}`);
+      if (sequence !== requestSequence.current) return;
+      setRegistrations((current) => [...current, ...result.items]);
+      setTotal(result.total);
+      setNextCursor(result.nextCursor);
+    } catch (loadError: unknown) {
+      if (sequence === requestSequence.current) {
+        setError(loadError instanceof Error ? loadError.message : "Could not load more registrations.");
+      }
+    } finally {
+      if (sequence === requestSequence.current) setLoadingMore(false);
+    }
+  }
 
   async function exportCsv() {
     if (!eventId) return;
@@ -95,8 +137,6 @@ export function RegistrationsPage() {
   }
 
   const event = events.find((item) => item.id === eventId);
-  const confirmed = registrations.filter((item) => item.status === "CONFIRMED").length;
-  const checkedIn = registrations.filter((item) => Boolean(item.ticket?.checkIn)).length;
 
   return (
     <main>
@@ -124,9 +164,9 @@ export function RegistrationsPage() {
 
       {event && (
         <section aria-label="Registration summary" className="mt-4 grid gap-4 sm:grid-cols-3">
-          <Metric label="Total registrations" value={registrations.length} icon={<Users aria-hidden="true" className="size-5" />} />
-          <Metric label="Confirmed" value={confirmed} icon={<TicketCheck aria-hidden="true" className="size-5" />} />
-          <Metric label="Checked in" value={checkedIn} icon={<TicketCheck aria-hidden="true" className="size-5" />} />
+          <Metric label="Total registrations" value={eventTotal} icon={<Users aria-hidden="true" className="size-5" />} />
+          <Metric label="Confirmed" value={confirmedCount} icon={<TicketCheck aria-hidden="true" className="size-5" />} />
+          <Metric label="Checked in" value={checkedInCount} icon={<TicketCheck aria-hidden="true" className="size-5" />} />
         </section>
       )}
 
@@ -134,7 +174,7 @@ export function RegistrationsPage() {
         <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
           <div>
             <h2 className="text-lg font-semibold" id="attendee-list-title">{event?.title ?? "Attendee list"}</h2>
-            <p className="mt-1 text-sm text-slate-500">{loadingRegistrations ? "Loading attendees…" : `${filtered.length} attendee${filtered.length === 1 ? "" : "s"}`}</p>
+            <p className="mt-1 text-sm text-slate-500">{loadingRegistrations ? "Loading attendees…" : search.trim() ? `${total} matching attendee${total === 1 ? "" : "s"} · showing ${registrations.length}` : `${eventTotal} attendee${eventTotal === 1 ? "" : "s"} · showing ${registrations.length}`}</p>
           </div>
           <label className="relative block w-full sm:max-w-xs">
             <Search aria-hidden="true" className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
@@ -149,9 +189,9 @@ export function RegistrationsPage() {
             <tbody className="divide-y divide-slate-100">
               {loadingRegistrations ? (
                 <tr><td className="px-5 py-12 text-center text-slate-500" colSpan={5}>Loading attendee records…</td></tr>
-              ) : filtered.length === 0 ? (
-                <tr><td className="px-5 py-12 text-center text-slate-500" colSpan={5}>{registrations.length ? "No registrations match this search." : "No registrations for this event yet."}</td></tr>
-              ) : filtered.map((registration) => (
+              ) : registrations.length === 0 ? (
+                <tr><td className="px-5 py-12 text-center text-slate-500" colSpan={5}>{search.trim() ? "No registrations match this search." : "No registrations for this event yet."}</td></tr>
+              ) : registrations.map((registration) => (
                 <tr className="hover:bg-slate-50/70" key={registration.id}>
                   <td className="px-5 py-4"><p className="font-semibold text-slate-900">{registration.firstName} {registration.lastName}</p><p className="mt-0.5 text-xs text-slate-500">{registration.email}{registration.phone ? ` · ${registration.phone}` : ""}</p></td>
                   <td className="px-4 py-4 text-slate-600">{registration.organization || "—"}</td>
@@ -163,6 +203,18 @@ export function RegistrationsPage() {
             </tbody>
           </table>
         </div>
+        {nextCursor && (
+          <div className="mt-4 text-center">
+            <button
+              className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              disabled={loadingMore || loadingRegistrations}
+              onClick={() => void loadMore()}
+              type="button"
+            >
+              {loadingMore ? "Loading…" : `Load more (${registrations.length} of ${total})`}
+            </button>
+          </div>
+        )}
       </section>
     </main>
   );

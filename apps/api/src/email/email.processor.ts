@@ -36,6 +36,9 @@ export class EmailProcessor extends WorkerHost {
     if (log.status !== 'PENDING') {
       return;
     }
+    if (log.scheduledAt.getTime() > Date.now()) {
+      return;
+    }
     if (!log.payloadCiphertext) {
       throw new Error(`Email log ${log.id} has no encrypted delivery payload`);
     }

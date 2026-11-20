@@ -45,6 +45,7 @@ describe('EventsService date validation', () => {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         findUnique: jest.fn().mockResolvedValue(null),
       },
+      crmSyncLog: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     };
     const prisma = {
       $transaction: jest.fn(async (callback: (tx: typeof transaction) => Promise<unknown>) =>
@@ -193,5 +194,76 @@ describe('EventsService date validation', () => {
       new BadRequestException('Registration deadline cannot be after the event starts'),
     );
     expect(prisma.event.create).not.toHaveBeenCalled();
+  });
+
+  describe('event reminder synchronization', () => {
+    const user = { sub: 'staff-id', role: 'EVENT_MANAGER' } as const;
+    const currentEvent = {
+      title: 'Academy Open Day',
+      slug: 'academy-open-day',
+      location: 'Main campus',
+      startDate: new Date('2030-05-10T09:00:00.000Z'),
+      endDate: new Date('2030-05-10T10:00:00.000Z'),
+      registrationDeadline: new Date('2030-05-09T09:00:00.000Z'),
+      reminderOffsetsHours: [24, 2],
+    };
+    const updatedEvent = {
+      ...currentEvent,
+      startDate: new Date('2030-05-11T09:00:00.000Z'),
+      endDate: new Date('2030-05-11T10:00:00.000Z'),
+    };
+    const transaction = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'event-id' }]),
+      event: {
+        findUnique: jest.fn(),
+        update: jest.fn(),
+      },
+    };
+    const prisma = {
+      $transaction: jest.fn(
+        async (callback: (tx: typeof transaction) => Promise<unknown>) =>
+          callback(transaction),
+      ),
+    };
+    const access = { requireEditAccess: jest.fn().mockResolvedValue(undefined) };
+    const queue = { synchronizeEventReminders: jest.fn().mockResolvedValue(undefined) };
+    const service = new EventsService(
+      prisma as never,
+      access as never,
+      queue as never,
+      { get: jest.fn().mockReturnValue('http://localhost:3000') } as never,
+    );
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      transaction.event.findUnique.mockResolvedValue(currentEvent);
+      transaction.event.update.mockResolvedValue(updatedEvent);
+      prisma.$transaction.mockImplementation(
+        async (callback: (tx: typeof transaction) => Promise<unknown>) =>
+          callback(transaction),
+      );
+    });
+
+    it('synchronizes reminders transactionally when the event time changes', async () => {
+      await service.update(
+        'event-id',
+        {
+          startDate: updatedEvent.startDate.toISOString(),
+          endDate: updatedEvent.endDate.toISOString(),
+        },
+        user,
+      );
+
+      expect(queue.synchronizeEventReminders).toHaveBeenCalledWith(
+        transaction,
+        updatedEvent,
+      );
+    });
+
+    it('does not reschedule reminders for unrelated edits', async () => {
+      await service.update('event-id', { description: 'Updated description' }, user);
+
+      expect(queue.synchronizeEventReminders).not.toHaveBeenCalled();
+    });
   });
 });

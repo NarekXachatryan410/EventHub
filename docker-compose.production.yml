@@ -1,0 +1,53 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile.production
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to the production PostgreSQL connection}
+      REDIS_URL: ${REDIS_URL:?Set REDIS_URL to the production Redis connection}
+      JWT_SECRET: ${JWT_SECRET:?Set a unique JWT_SECRET of at least 32 characters}
+      EMAIL_ENCRYPTION_KEY: ${EMAIL_ENCRYPTION_KEY:?Set a separate encryption secret of at least 32 characters}
+      WEB_ORIGIN: ${WEB_ORIGIN:?Set WEB_ORIGIN to the HTTPS frontend origin}
+      RESEND_API_KEY: ${RESEND_API_KEY:?Set RESEND_API_KEY}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:?Set a verified RESEND_FROM_EMAIL}
+      RESEND_WEBHOOK_SECRET: ${RESEND_WEBHOOK_SECRET:?Set RESEND_WEBHOOK_SECRET from the Resend webhook}
+      NAVIGATOR_API_URL: ${NAVIGATOR_API_URL:-}
+      NAVIGATOR_API_KEY: ${NAVIGATOR_API_KEY:-}
+    expose:
+      - "4000"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:4000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile.production
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?Set the browser-accessible API URL}
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:?Set the public frontend URL}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      API_INTERNAL_URL: http://api:4000
+    expose:
+      - "3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s

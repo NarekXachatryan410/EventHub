@@ -1,16 +1,28 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { Roles } from '../auth/roles.decorator.js';
 import { RolesGuard } from '../auth/roles.guard.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { EmailQueueService } from './email-queue.service.js';
 import { ListEmailLogsDto } from './dto/list-email-logs.dto.js';
 
 @Controller('email-logs')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.SUPER_ADMIN, UserRole.EVENT_MANAGER)
 export class EmailLogsController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly emailQueue: EmailQueueService,
+  ) {}
 
   @Get()
   list(@Query() query: ListEmailLogsDto) {
@@ -41,5 +53,10 @@ export class EmailLogsController {
         },
       },
     });
+  }
+
+  @Post(':id/retry')
+  retry(@Param('id', ParseUUIDPipe) id: string) {
+    return this.emailQueue.retryFailedLog(id);
   }
 }

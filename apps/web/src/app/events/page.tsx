@@ -16,6 +16,10 @@ type PublicEvent = {
   location: string;
   startDate: string;
   type: string;
+  status: string;
+  registrationEnabled: boolean;
+  registrationDeadline: string;
+  remainingAttendees: number | null;
   coverImage: string | null;
 };
 
@@ -53,35 +57,51 @@ async function EventsList() {
   ) : (
     <ul className="mt-10 grid gap-5 md:grid-cols-2">
       {events.map((event) => (
-        <li
-          className="overflow-hidden rounded-2xl border border-stone-200 bg-white"
-          key={event.slug}
-        >
-          {event.coverImage && (
-            <EventCoverImage alt="" className="h-52 w-full object-cover" src={event.coverImage} />
-          )}
-          <div className="p-6">
-            <p className="text-sm font-medium text-indigo-700">
-              {new Intl.DateTimeFormat("en", {
-                dateStyle: "medium",
-                timeStyle: "short",
-              }).format(new Date(event.startDate))}
-            </p>
-            <h2 className="mt-2 text-xl font-semibold">
-              <Link className="hover:text-indigo-700" href={`/events/${event.slug}`}>
-                {event.title}
-              </Link>
-            </h2>
-            <p className="mt-2 line-clamp-3 text-sm leading-6 text-stone-600">
-              {event.description.replace(/<[^>]*>/g, " ")}
-            </p>
-            <p className="mt-4 text-sm text-stone-500">
-              {event.type.replaceAll("_", " ")} · {event.location}
-            </p>
-          </div>
-        </li>
+        <EventCard event={event} key={event.slug} />
       ))}
     </ul>
+  );
+}
+
+function EventCard({ event }: { event: PublicEvent }) {
+  const registrationOpen =
+    event.status === "PUBLISHED" &&
+    event.registrationEnabled &&
+    new Date(event.registrationDeadline) > new Date();
+  const waitlistAvailable =
+    registrationOpen && event.remainingAttendees === 0;
+
+  return (
+    <li className="overflow-hidden rounded-2xl border border-stone-200 bg-white">
+      {event.coverImage && (
+        <EventCoverImage alt="" className="h-52 w-full object-cover" src={event.coverImage} />
+      )}
+      <div className="p-6">
+        <p className="text-sm font-medium text-indigo-700">
+          {new Intl.DateTimeFormat("en", {
+            dateStyle: "medium",
+            timeStyle: "short",
+          }).format(new Date(event.startDate))}
+        </p>
+        <h2 className="mt-2 text-xl font-semibold">
+          <Link className="hover:text-indigo-700" href={`/events/${event.slug}`}>
+            {event.title}
+          </Link>
+        </h2>
+        <p className="mt-2 line-clamp-3 text-sm leading-6 text-stone-600">
+          {event.description.replace(/<[^>]*>/g, " ")}
+        </p>
+        <p className="mt-4 text-sm text-stone-500">
+          {event.type.replaceAll("_", " ")} · {event.location}
+        </p>
+        <Link
+          className="mt-5 inline-flex h-10 items-center justify-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white transition hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+          href={`/events/${event.slug}#registration`}
+        >
+          {waitlistAvailable ? "Join waitlist" : registrationOpen ? "Register" : "View details"}
+        </Link>
+      </div>
+    </li>
   );
 }
 

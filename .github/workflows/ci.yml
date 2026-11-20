@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate
+      - run: npm run lint
+      - run: npm test --workspace=api -- --runInBand
+      - run: npm run test:e2e --workspace=api -- --runInBand
+      - run: npm run build
+      - uses: docker/setup-buildx-action@v3
+      - name: Build production API image
+        run: docker build -f apps/api/Dockerfile.production -t eventhub-api:ci .
+      - name: Build production web image
+        run: >-
+          docker build -f apps/web/Dockerfile.production
+          --build-arg NEXT_PUBLIC_API_URL=https://api.example.invalid
+          --build-arg NEXT_PUBLIC_SITE_URL=https://events.example.invalid
+          -t eventhub-web:ci .

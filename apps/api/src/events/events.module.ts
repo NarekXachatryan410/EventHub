@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module.js';
 import { EmailModule } from '../email/email.module.js';
+import { CrmModule } from '../crm/crm.module.js';
 import { EventAccessService } from './event-access.service.js';
 import { CheckInsController } from './check-ins.controller.js';
 import { CheckInsService } from './check-ins.service.js';
@@ -12,7 +13,7 @@ import { RegistrationsController } from './registrations.controller.js';
 import { RegistrationsService } from './registrations.service.js';
 
 @Module({
-  imports: [AuthModule, EmailModule],
+  imports: [AuthModule, EmailModule, CrmModule],
   controllers: [
     EventsController,
     RegistrationsController,

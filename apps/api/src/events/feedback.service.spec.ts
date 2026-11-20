@@ -8,7 +8,7 @@ describe('FeedbackService', () => {
   let service: FeedbackService;
   let prisma: {
     ticket: { findUnique: jest.Mock };
-    feedback: { create: jest.Mock };
+    feedback: { create: jest.Mock; findMany: jest.Mock };
   };
 
   beforeEach(() => {
@@ -30,6 +30,7 @@ describe('FeedbackService', () => {
       },
       feedback: {
         create: jest.fn().mockResolvedValue({ id: 'feedback-id' }),
+        findMany: jest.fn(),
       },
     };
     service = new FeedbackService(
@@ -88,5 +89,24 @@ describe('FeedbackService', () => {
       service.submit({ feedbackToken: 'feedback-token', overallRating: 5 }),
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(prisma.feedback.create).not.toHaveBeenCalled();
+  });
+
+  it('exports feedback as formula-safe CSV', async () => {
+    prisma.feedback.findMany.mockResolvedValue([
+      {
+        overallRating: 5,
+        contentRating: null,
+        organizationRating: 4,
+        comment: '=SUM(A1:A2), "great"',
+        interestedInPrograms: true,
+        submittedAt: new Date('2026-11-20T10:00:00.000Z'),
+        registration: { firstName: 'Ada', lastName: 'Lovelace' },
+      },
+    ]);
+    const user = { sub: 'manager-id', role: 'EVENT_MANAGER' } as never;
+
+    await expect(service.exportCsv('event-id', user)).resolves.toContain(
+      `"Ada","Lovelace","5","","4","Yes","'=SUM(A1:A2), ""great""","2026-11-20T10:00:00.000Z"`,
+    );
   });
 });

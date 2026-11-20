@@ -34,12 +34,14 @@ export function CheckInWorkspace() {
   const [scanning, setScanning] = useState(false);
   const [submitting, setSubmitting] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [recordsLoading, setRecordsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [scannerError, setScannerError] = useState<string | null>(null);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const scanningRef = useRef(false);
   const inFlightRef = useRef(false);
+  const recordsRequestRef = useRef(0);
   const messageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -57,17 +59,30 @@ export function CheckInWorkspace() {
   }, []);
 
   const loadEventRecords = useCallback(async () => {
-    if (!eventId) return;
+    const requestId = ++recordsRequestRef.current;
+    if (!eventId) {
+      setAttendees([]);
+      setCheckIns([]);
+      setRecordsLoading(false);
+      return;
+    }
+
+    setRecordsLoading(true);
     try {
       const [registrations, rows] = await Promise.all([
         staffApi<StaffRegistration[]>(`/events/${eventId}/registrations`),
         staffApi<CheckInRecord[]>(`/events/${eventId}/check-ins`),
       ]);
+      if (requestId !== recordsRequestRef.current) return;
       setAttendees(registrations);
       setCheckIns(rows);
       setError(null);
     } catch (loadError: unknown) {
-      setError(loadError instanceof Error ? loadError.message : "Could not load event check-in records.");
+      if (requestId === recordsRequestRef.current) {
+        setError(loadError instanceof Error ? loadError.message : "Could not load event check-in records.");
+      }
+    } finally {
+      if (requestId === recordsRequestRef.current) setRecordsLoading(false);
     }
   }, [eventId]);
 
@@ -169,14 +184,15 @@ export function CheckInWorkspace() {
   }, []);
 
   const searchableAttendees = useMemo(() => {
-    const term = search.trim().toLowerCase();
+    const terms = search.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
     return attendees.filter((attendee) => {
-      const isEligible = attendee.status === "CONFIRMED" && attendee.ticket?.status === "VALID";
-      const matches =
-        !term ||
-        `${attendee.firstName} ${attendee.lastName}`.toLowerCase().includes(term) ||
-        attendee.email.toLowerCase().includes(term);
-      return isEligible && matches;
+      const ticketStatus = attendee.ticket?.status;
+      const isConfirmedWithTicket =
+        attendee.status === "CONFIRMED" &&
+        (ticketStatus === "VALID" || ticketStatus === "CHECKED_IN");
+      const searchableText = `${attendee.firstName} ${attendee.lastName} ${attendee.email}`.toLocaleLowerCase();
+      const matches = terms.every((term) => searchableText.includes(term));
+      return isConfirmedWithTicket && matches;
     }).slice(0, 8);
   }, [attendees, search]);
 
@@ -248,7 +264,13 @@ export function CheckInWorkspace() {
         <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <label className="min-w-[14rem] flex-1 text-sm font-medium text-slate-700">Assigned event
-              <select className="mt-1.5 h-11 w-full rounded-xl border border-slate-300 bg-white px-3 outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10" disabled={loading || events.length === 0} onChange={(input) => setEventId(input.target.value)} value={eventId}>
+              <select className="mt-1.5 h-11 w-full rounded-xl border border-slate-300 bg-white px-3 outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10" disabled={loading || events.length === 0} onChange={(input) => {
+                setEventId(input.target.value);
+                setSearch("");
+                setAttendees([]);
+                setCheckIns([]);
+                setError(null);
+              }} value={eventId}>
                 {events.length === 0 && <option value="">{loading ? "Loading assigned events…" : "No assigned events"}</option>}
                 {events.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
               </select>
@@ -286,14 +308,23 @@ export function CheckInWorkspace() {
           </div>
           <label className="relative mt-5 block">
             <Search aria-hidden="true" className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-            <input className="h-11 w-full rounded-xl border border-slate-300 pl-9 pr-3 text-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10" disabled={!eventId} onChange={(input) => setSearch(input.target.value)} placeholder="Name or email" value={search} />
+            <input className="h-11 w-full rounded-xl border border-slate-300 pl-9 pr-3 text-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10" disabled={!eventId || recordsLoading} onChange={(input) => setSearch(input.target.value)} placeholder="Name, surname, or email" value={search} />
           </label>
           <div className="mt-3 divide-y divide-slate-100">
-            {search.trim() && searchableAttendees.length === 0 && <p className="py-5 text-center text-sm text-slate-500">No eligible attendee found.</p>}
+            {recordsLoading && <p className="py-5 text-center text-sm text-slate-500" role="status">Loading attendees…</p>}
+            {!recordsLoading && search.trim() && searchableAttendees.length === 0 && <p className="py-5 text-center text-sm text-slate-500">No eligible attendee found.</p>}
             {searchableAttendees.map((attendee) => (
               <div className="flex items-center justify-between gap-3 py-3" key={attendee.id}>
-                <div className="min-w-0"><p className="truncate text-sm font-semibold">{attendee.firstName} {attendee.lastName}</p><p className="truncate text-xs text-slate-500">{attendee.email}</p></div>
-                <button className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-indigo-600 px-3 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-60" disabled={Boolean(submitting)} onClick={() => void manualCheckIn(attendee.id)} type="button">{submitting === attendee.id ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <UserCheck aria-hidden="true" className="size-3.5" />}Check in</button>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold">{attendee.firstName} {attendee.lastName}</p>
+                  <p className="truncate text-xs text-slate-500">{attendee.email}</p>
+                  {attendee.ticket?.checkIn && (
+                    <p className="mt-1 text-xs font-medium text-emerald-700">
+                      Checked in {formatDate(attendee.ticket.checkIn.checkedInAt)}
+                    </p>
+                  )}
+                </div>
+                <button className={`inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-white disabled:opacity-60 ${attendee.ticket?.status === "CHECKED_IN" || attendee.ticket?.checkIn ? "bg-emerald-700" : "bg-indigo-600 hover:bg-indigo-700"}`} disabled={Boolean(submitting) || attendee.ticket?.status === "CHECKED_IN" || Boolean(attendee.ticket?.checkIn)} onClick={() => void manualCheckIn(attendee.id)} type="button">{submitting === attendee.id ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : attendee.ticket?.status === "CHECKED_IN" || attendee.ticket?.checkIn ? <TicketCheck aria-hidden="true" className="size-3.5" /> : <UserCheck aria-hidden="true" className="size-3.5" />}{attendee.ticket?.status === "CHECKED_IN" || attendee.ticket?.checkIn ? "Checked in" : "Check in"}</button>
               </div>
             ))}
           </div>

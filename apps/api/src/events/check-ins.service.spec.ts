@@ -13,6 +13,7 @@ describe('CheckInsService', () => {
     $queryRaw: jest.Mock;
     ticket: { findUnique: jest.Mock; update: jest.Mock };
     checkIn: { create: jest.Mock };
+    crmSyncLog: { upsert: jest.Mock };
   };
   let prisma: {
     $transaction: jest.Mock;
@@ -32,6 +33,7 @@ describe('CheckInsService', () => {
           checkedInAt: new Date('2030-05-10T09:00:00.000Z'),
         }),
       },
+      crmSyncLog: { upsert: jest.fn().mockResolvedValue({}) },
     };
     prisma = {
       $transaction: jest.fn(
@@ -43,6 +45,7 @@ describe('CheckInsService', () => {
     service = new CheckInsService(
       prisma as never,
       { requireManageAccess: jest.fn().mockResolvedValue(undefined) } as never,
+      { scheduleRegistrationSync: jest.fn().mockResolvedValue({}) } as never,
     );
   });
 

@@ -21,12 +21,14 @@ import QRCode from 'qrcode';
 import type { AuthUser } from '../auth/auth.types.js';
 import { EmailQueueService } from '../email/email-queue.service.js';
 import type { EmailPayload } from '../email/email.types.js';
+import { CrmSyncService } from '../crm/crm-sync.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { EventAccessService } from './event-access.service.js';
 import type {
   CancelRegistrationDto,
   CreateRegistrationDto,
 } from './dto/create-registration.dto.js';
+import type { ListRegistrationsPageDto } from './dto/list-registrations-page.dto.js';
 
 const activeStatuses: RegistrationStatus[] = [
   RegistrationStatus.PENDING,
@@ -58,6 +60,7 @@ export class RegistrationsService {
     private readonly access: EventAccessService,
     private readonly emailQueue: EmailQueueService,
     private readonly config: ConfigService,
+    private readonly crmSync: CrmSyncService,
   ) {}
 
   async register(eventId: string, input: CreateRegistrationDto) {
@@ -106,6 +109,73 @@ export class RegistrationsService {
         },
       },
     });
+  }
+
+  async listPage(
+    eventId: string,
+    user: AuthUser,
+    query: ListRegistrationsPageDto,
+  ) {
+    await this.access.requireManageAccess(eventId, user);
+    const terms = query.search?.trim().split(/\s+/).filter(Boolean) ?? [];
+    const where: Prisma.EventRegistrationWhereInput = {
+      eventId,
+      ...(terms.length
+        ? {
+            AND: terms.map((term) => ({
+              OR: [
+                { firstName: { contains: term, mode: 'insensitive' as const } },
+                { lastName: { contains: term, mode: 'insensitive' as const } },
+                { email: { contains: term, mode: 'insensitive' as const } },
+                { organization: { contains: term, mode: 'insensitive' as const } },
+              ],
+            })),
+          }
+        : {}),
+    };
+    const [total, eventTotal, confirmedCount, checkedInCount, registrations] =
+      await Promise.all([
+      this.prisma.eventRegistration.count({ where }),
+      this.prisma.eventRegistration.count({ where: { eventId } }),
+      this.prisma.eventRegistration.count({
+        where: { eventId, status: RegistrationStatus.CONFIRMED },
+      }),
+      this.prisma.eventRegistration.count({
+        where: { eventId, ticket: { is: { checkIn: { isNot: null } } } },
+      }),
+      this.prisma.eventRegistration.findMany({
+        where,
+        ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
+        orderBy: [{ registeredAt: 'desc' }, { id: 'desc' }],
+        take: query.limit + 1,
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+          phone: true,
+          organization: true,
+          status: true,
+          registeredAt: true,
+          ticket: {
+            select: {
+              status: true,
+              checkIn: { select: { checkedInAt: true, checkedInBy: true } },
+            },
+          },
+        },
+      }),
+      ]);
+    const hasMore = registrations.length > query.limit;
+    const items = hasMore ? registrations.slice(0, query.limit) : registrations;
+    return {
+      items,
+      total,
+      eventTotal,
+      confirmedCount,
+      checkedInCount,
+      nextCursor: hasMore ? items.at(-1)?.id ?? null : null,
+    };
   }
 
   async getById(registrationId: string, user: AuthUser) {
@@ -215,6 +285,7 @@ export class RegistrationsService {
         where: { id: registration.id },
         data: { status: RegistrationStatus.CANCELLED },
       });
+      await this.crmSync.scheduleRegistrationSync(transaction, registration.id);
       if (registration.ticket) {
         await transaction.ticket.update({
           where: { id: registration.ticket.id },
@@ -267,6 +338,10 @@ export class RegistrationsService {
               },
             },
           });
+          await this.crmSync.scheduleRegistrationSync(
+            transaction,
+            nextWaitlisted.id,
+          );
           const promotionEmail = await this.emailQueue.createOutboxEntry(
             transaction,
             {
@@ -384,6 +459,10 @@ export class RegistrationsService {
             ticket: { select: { id: true } },
           },
         });
+        await this.crmSync.scheduleRegistrationSync(
+          transaction,
+          registration.id,
+        );
 
         const emailType =
           status === RegistrationStatus.WAITLISTED

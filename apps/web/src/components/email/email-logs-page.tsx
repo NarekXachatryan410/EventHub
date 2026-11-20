@@ -4,7 +4,18 @@ import { Mail, RefreshCw, Search } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { staffApi, formatDate, type StaffEmailLog } from "@/lib/staff-api";
 
-const statuses = ["ALL", "PENDING", "SENT", "FAILED", "CANCELLED"] as const;
+const statuses = [
+  "ALL",
+  "PENDING",
+  "SENT",
+  "DELIVERED",
+  "DELIVERY_DELAYED",
+  "BOUNCED",
+  "COMPLAINED",
+  "SUPPRESSED",
+  "FAILED",
+  "CANCELLED",
+] as const;
 
 export function EmailLogsPage() {
   const [logs, setLogs] = useState<StaffEmailLog[]>([]);
@@ -12,6 +23,7 @@ export function EmailLogsPage() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const loadLogs = useCallback(async () => {
@@ -37,6 +49,26 @@ export function EmailLogsPage() {
       log.type.toLowerCase().includes(term);
   });
 
+  async function retry(logId: string) {
+    setRetryingId(logId);
+    try {
+      await staffApi<{ success: boolean }>(`/email-logs/${logId}/retry`, {
+        method: "POST",
+      });
+      setError(null);
+      setRefreshing(true);
+      await loadLogs();
+    } catch (retryError: unknown) {
+      setError(
+        retryError instanceof Error
+          ? retryError.message
+          : "Could not retry this email.",
+      );
+    } finally {
+      setRetryingId(null);
+    }
+  }
+
   return (
     <main>
       <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
@@ -55,7 +87,7 @@ export function EmailLogsPage() {
           <div className="divide-y divide-slate-100">
             {visible.map((log) => <article className="grid gap-3 px-5 py-4 sm:grid-cols-[minmax(12rem,1fr)_minmax(10rem,0.7fr)_8rem_10rem]" key={log.id}>
               <div className="min-w-0"><p className="truncate text-sm font-semibold">{log.registration.event.title}</p><p className="mt-1 truncate text-sm text-slate-600">{log.registration.email}</p><p className="mt-1 text-xs text-slate-400">{log.type.replaceAll("_", " ")}</p></div>
-              <div><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${log.status === "SENT" ? "bg-emerald-50 text-emerald-700" : log.status === "FAILED" ? "bg-red-50 text-red-700" : log.status === "CANCELLED" ? "bg-slate-100 text-slate-600" : "bg-amber-50 text-amber-700"}`}>{log.status}</span><p className="mt-1.5 text-xs text-slate-500">{log.attempts} attempt{log.attempts === 1 ? "" : "s"}</p>{log.status === "FAILED" && log.errorMessage && <p className="mt-1 line-clamp-2 text-xs text-red-700">{log.errorMessage}</p>}</div>
+              <div><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${["SENT", "DELIVERED"].includes(log.status) ? "bg-emerald-50 text-emerald-700" : ["FAILED", "BOUNCED", "COMPLAINED", "SUPPRESSED"].includes(log.status) ? "bg-red-50 text-red-700" : log.status === "CANCELLED" ? "bg-slate-100 text-slate-600" : "bg-amber-50 text-amber-700"}`}>{log.status.replaceAll("_", " ")}</span><p className="mt-1.5 text-xs text-slate-500">{log.attempts} attempt{log.attempts === 1 ? "" : "s"}</p>{log.status === "FAILED" && log.errorMessage && <p className="mt-1 line-clamp-2 text-xs text-red-700">{log.errorMessage}</p>}{log.status === "FAILED" && <button className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-lg border border-red-200 bg-white px-2.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50" disabled={retryingId === log.id} onClick={() => retry(log.id)} type="button"><RefreshCw aria-hidden="true" className={`size-3 ${retryingId === log.id ? "animate-spin" : ""}`} />{retryingId === log.id ? "Retrying…" : "Retry email"}</button>}</div>
               <p className="text-xs text-slate-500 sm:pt-1.5">{log.sentAt ? `Sent ${formatDate(log.sentAt)}` : `Queued ${formatDate(log.createdAt)}`}</p>
               <p className="text-xs text-slate-500 sm:text-right sm:pt-1.5">{log.scheduledAt > log.createdAt ? `Scheduled ${formatDate(log.scheduledAt)}` : "Immediate"}</p>
             </article>)}

@@ -2,13 +2,17 @@
 
 import {
   Activity,
+  BarChart3,
   CalendarDays,
+  ClipboardCheck,
   ClipboardList,
   LayoutDashboard,
   LogOut,
+  Link2,
   Mail,
   QrCode,
   Shield,
+  ScrollText,
   Users,
 } from "lucide-react";
 import Link from "next/link";
@@ -71,6 +75,30 @@ const navigation: NavigationItem[] = [
     icon: Mail,
     roles: ["SUPER_ADMIN", "EVENT_MANAGER"],
   },
+  {
+    href: "/dashboard/planning",
+    label: "Planning",
+    icon: ClipboardCheck,
+    roles: ["SUPER_ADMIN", "EVENT_MANAGER"],
+  },
+  {
+    href: "/dashboard/analytics",
+    label: "Analytics",
+    icon: BarChart3,
+    roles: ["SUPER_ADMIN", "EVENT_MANAGER"],
+  },
+  {
+    href: "/dashboard/audit-logs",
+    label: "Audit Logs",
+    icon: ScrollText,
+    roles: ["SUPER_ADMIN"],
+  },
+  {
+    href: "/dashboard/crm-sync",
+    label: "CRM Sync",
+    icon: Link2,
+    roles: ["SUPER_ADMIN"],
+  },
 ];
 
 const restrictedPaths: { path: string; roles: StaffRole[] }[] = [
@@ -78,6 +106,10 @@ const restrictedPaths: { path: string; roles: StaffRole[] }[] = [
   { path: "/dashboard/events", roles: ["SUPER_ADMIN", "EVENT_MANAGER"] },
   { path: "/dashboard/registrations", roles: ["SUPER_ADMIN", "EVENT_MANAGER"] },
   { path: "/dashboard/email-logs", roles: ["SUPER_ADMIN", "EVENT_MANAGER"] },
+  { path: "/dashboard/planning", roles: ["SUPER_ADMIN", "EVENT_MANAGER"] },
+  { path: "/dashboard/analytics", roles: ["SUPER_ADMIN", "EVENT_MANAGER"] },
+  { path: "/dashboard/audit-logs", roles: ["SUPER_ADMIN"] },
+  { path: "/dashboard/crm-sync", roles: ["SUPER_ADMIN"] },
 ];
 
 export function useStaffUser(): StaffUser | null {

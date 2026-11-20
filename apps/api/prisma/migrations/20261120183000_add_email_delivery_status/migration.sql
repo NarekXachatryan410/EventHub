@@ -1,0 +1,7 @@
+ALTER TYPE "EmailStatus" ADD VALUE 'DELIVERED';
+ALTER TYPE "EmailStatus" ADD VALUE 'DELIVERY_DELAYED';
+ALTER TYPE "EmailStatus" ADD VALUE 'BOUNCED';
+ALTER TYPE "EmailStatus" ADD VALUE 'COMPLAINED';
+ALTER TYPE "EmailStatus" ADD VALUE 'SUPPRESSED';
+
+CREATE INDEX "EmailLog_providerId_idx" ON "EmailLog"("providerId");

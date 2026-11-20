@@ -6,10 +6,12 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Res,
   UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
+import { Throttle } from '@nestjs/throttler';
 import { UserRole } from '@prisma/client';
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import type { AuthenticatedRequest } from '../auth/auth.types.js';
@@ -20,6 +22,7 @@ import {
   CancelRegistrationDto,
   CreateRegistrationDto,
 } from './dto/create-registration.dto.js';
+import { ListRegistrationsPageDto } from './dto/list-registrations-page.dto.js';
 import { RegistrationsService } from './registrations.service.js';
 
 @Controller()
@@ -27,6 +30,7 @@ export class RegistrationsController {
   constructor(private readonly registrations: RegistrationsService) {}
 
   @Post('events/:eventId/register')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   register(
     @Param('eventId', ParseUUIDPipe) eventId: string,
     @Body() input: CreateRegistrationDto,
@@ -42,6 +46,17 @@ export class RegistrationsController {
     @CurrentUser() user: AuthenticatedRequest['user'],
   ) {
     return this.registrations.list(eventId, user);
+  }
+
+  @Get('events/:eventId/registrations/page')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.EVENT_MANAGER, UserRole.CHECK_IN_STAFF)
+  listPage(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Query() query: ListRegistrationsPageDto,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    return this.registrations.listPage(eventId, user, query);
   }
 
   @Get('events/:eventId/registrations/export')
@@ -81,6 +96,7 @@ export class RegistrationsController {
   }
 
   @Patch('registrations/:registrationId/cancel')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   cancelByToken(
     @Param('registrationId', ParseUUIDPipe) registrationId: string,
     @Body() input: CancelRegistrationDto,

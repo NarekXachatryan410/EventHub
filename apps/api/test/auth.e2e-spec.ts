@@ -33,6 +33,7 @@ describe('Staff authentication and management (e2e)', () => {
   let prismaMock: {
     $queryRaw: jest.Mock;
     $transaction: jest.Mock;
+    auditLog: { create: jest.Mock };
     user: {
       count: jest.Mock;
       create: jest.Mock;
@@ -82,6 +83,7 @@ describe('Staff authentication and management (e2e)', () => {
     prismaMock = {
       $queryRaw: jest.fn().mockResolvedValue([]),
       $transaction: jest.fn(),
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
       user: {
         count: jest.fn(async ({ where }) =>
           [...users.values()].filter(
@@ -196,6 +198,20 @@ describe('Staff authentication and management (e2e)', () => {
     });
     expect(response.body).not.toHaveProperty('token');
     expect(JSON.stringify(response.body)).not.toContain('passwordHash');
+  });
+
+  it('rate limits repeated staff sign-in attempts', async () => {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ email: 'unknown@example.com', password: 'wrong-password' })
+        .expect(401);
+    }
+
+    await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ email: 'unknown@example.com', password: 'wrong-password' })
+      .expect(429);
   });
 
   it('blocks unauthenticated staff-list requests', async () => {

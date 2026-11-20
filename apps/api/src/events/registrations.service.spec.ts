@@ -13,6 +13,7 @@ describe('RegistrationsService', () => {
   let transaction: {
     $queryRaw: jest.Mock;
     event: { findUnique: jest.Mock };
+    crmSyncLog: { upsert: jest.Mock };
     eventRegistration: {
       count: jest.Mock;
       create: jest.Mock;
@@ -52,6 +53,7 @@ describe('RegistrationsService', () => {
     transaction = {
       $queryRaw: jest.fn().mockResolvedValue([{ id: eventId }]),
       event: { findUnique: jest.fn() },
+      crmSyncLog: { upsert: jest.fn().mockResolvedValue({}) },
       eventRegistration: {
         count: jest.fn().mockResolvedValue(0),
         create: jest.fn().mockImplementation(async ({ data }) => ({
@@ -84,6 +86,7 @@ describe('RegistrationsService', () => {
       { requireManageAccess: jest.fn() } as never,
       emailQueue as never,
       { get: jest.fn().mockReturnValue('http://localhost:3000') } as never,
+      { scheduleRegistrationSync: jest.fn().mockResolvedValue({}) } as never,
     );
   });
 
@@ -193,5 +196,47 @@ describe('RegistrationsService', () => {
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(transaction.eventRegistration.create).not.toHaveBeenCalled();
+  });
+
+  it('paginates registrations and searches all name parts without order sensitivity', async () => {
+    const listPrisma = {
+      eventRegistration: {
+        count: jest.fn().mockResolvedValue(1),
+        findMany: jest.fn().mockResolvedValue([{ id: registrationId }]),
+      },
+    };
+    const listService = new RegistrationsService(
+      listPrisma as never,
+      { requireManageAccess: jest.fn().mockResolvedValue(undefined) } as never,
+      emailQueue as never,
+      { get: jest.fn() } as never,
+      { scheduleRegistrationSync: jest.fn() } as never,
+    );
+
+    const result = await listService.listPage(
+      eventId,
+      { sub: 'staff-id', role: 'EVENT_MANAGER' } as never,
+      { limit: 25, search: 'Ada Lovelace' },
+    );
+
+    const query = listPrisma.eventRegistration.findMany.mock.calls[0]?.[0] as {
+      where: { AND: Array<{ OR: Array<Record<string, unknown>> }> };
+      take: number;
+    };
+    expect(result.items).toEqual([{ id: registrationId }]);
+    expect(query.take).toBe(26);
+    expect(query.where.AND).toHaveLength(2);
+    expect(query.where.AND[0]?.OR).toEqual(
+      expect.arrayContaining([
+        { firstName: { contains: 'Ada', mode: 'insensitive' } },
+        { lastName: { contains: 'Ada', mode: 'insensitive' } },
+      ]),
+    );
+    expect(query.where.AND[1]?.OR).toEqual(
+      expect.arrayContaining([
+        { firstName: { contains: 'Lovelace', mode: 'insensitive' } },
+        { lastName: { contains: 'Lovelace', mode: 'insensitive' } },
+      ]),
+    );
   });
 });

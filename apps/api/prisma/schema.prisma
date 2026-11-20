@@ -60,60 +60,77 @@ enum EmailType {
 enum EmailStatus {
   PENDING
   SENT
+  DELIVERED
+  DELIVERY_DELAYED
+  BOUNCED
+  COMPLAINED
+  SUPPRESSED
   FAILED
   CANCELLED
 }
 
 enum CrmSyncStatus {
   PENDING
+  PROCESSING
   SYNCED
   FAILED
 }
 
+enum PlanningTaskStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  BLOCKED
+}
+
 model User {
-  id             String                 @id @default(uuid()) @db.Uuid
-  firstName      String
-  lastName       String
-  email          String                 @unique
-  passwordHash   String
-  role           UserRole               @default(EVENT_MANAGER)
-  isActive       Boolean                @default(true)
-  events         Event[]                @relation("EventOrganizer")
-  checkIns       CheckIn[]
-  assignedEvents EventStaffAssignment[]
-  createdAt      DateTime               @default(now()) @db.Timestamptz(6)
-  updatedAt      DateTime               @updatedAt @db.Timestamptz(6)
+  id                       String                 @id @default(uuid()) @db.Uuid
+  firstName                String
+  lastName                 String
+  email                    String                 @unique
+  passwordHash             String
+  role                     UserRole               @default(EVENT_MANAGER)
+  isActive                 Boolean                @default(true)
+  events                   Event[]                @relation("EventOrganizer")
+  checkIns                 CheckIn[]
+  assignedEvents           EventStaffAssignment[]
+  assignedPlanningTasks    PlanningTask[]         @relation("PlanningTaskAssignee")
+  createdPlanningTemplates PlanningTemplate[]     @relation("PlanningTemplateCreator")
+  auditLogs                AuditLog[]
+  createdAt                DateTime               @default(now()) @db.Timestamptz(6)
+  updatedAt                DateTime               @updatedAt @db.Timestamptz(6)
 
   @@index([role, isActive])
 }
 
 model Event {
-  id                    String                 @id @default(uuid()) @db.Uuid
+  id                    String                  @id @default(uuid()) @db.Uuid
   title                 String
-  slug                  String                 @unique
+  slug                  String                  @unique
   description           String
   coverImage            String?
   type                  EventType
-  status                EventStatus            @default(DRAFT)
+  status                EventStatus             @default(DRAFT)
   location              String
-  startDate             DateTime               @db.Timestamptz(6)
-  endDate               DateTime               @db.Timestamptz(6)
-  registrationDeadline  DateTime               @db.Timestamptz(6)
+  startDate             DateTime                @db.Timestamptz(6)
+  endDate               DateTime                @db.Timestamptz(6)
+  registrationDeadline  DateTime                @db.Timestamptz(6)
   maxAttendees          Int?
-  organizerId           String                 @db.Uuid
-  organizer             User                   @relation("EventOrganizer", fields: [organizerId], references: [id], onDelete: Restrict)
+  organizerId           String                  @db.Uuid
+  organizer             User                    @relation("EventOrganizer", fields: [organizerId], references: [id], onDelete: Restrict)
   contactEmail          String?
   seoTitle              String?
   seoDescription        String?
-  registrationEnabled   Boolean                @default(true)
-  allowSelfCancellation Boolean                @default(true)
+  registrationEnabled   Boolean                 @default(true)
+  allowSelfCancellation Boolean                 @default(true)
   registrationQuestions Json?
-  reminderOffsetsHours  Int[]                  @default([24, 2])
+  reminderOffsetsHours  Int[]                   @default([24, 2])
   registrations         EventRegistration[]
   feedback              Feedback[]
   staffAssignments      EventStaffAssignment[]
-  createdAt             DateTime               @default(now()) @db.Timestamptz(6)
-  updatedAt             DateTime               @updatedAt @db.Timestamptz(6)
+  planningChecklist     EventPlanningChecklist?
+  createdAt             DateTime                @default(now()) @db.Timestamptz(6)
+  updatedAt             DateTime                @updatedAt @db.Timestamptz(6)
 
   @@index([status, startDate])
 }
@@ -141,6 +158,7 @@ model EventRegistration {
 
   @@unique([eventId, normalizedEmail])
   @@index([eventId, status])
+  @@index([eventId, registeredAt])
 }
 
 model Ticket {
@@ -184,6 +202,8 @@ model EmailLog {
   createdAt         DateTime          @default(now()) @db.Timestamptz(6)
 
   @@index([registrationId, type, status])
+  @@index([status, scheduledAt])
+  @@index([providerId])
 }
 
 model EmailTemplate {
@@ -233,10 +253,85 @@ model CrmSyncLog {
   leadId         String?
   errorMessage   String?
   attempts       Int               @default(0)
+  version        Int               @default(0)
   lastAttemptAt  DateTime?         @db.Timestamptz(6)
   syncedAt       DateTime?         @db.Timestamptz(6)
   createdAt      DateTime          @default(now()) @db.Timestamptz(6)
   updatedAt      DateTime          @updatedAt @db.Timestamptz(6)
 
   @@index([status, updatedAt])
+  @@index([status, attempts, lastAttemptAt])
+}
+
+model PlanningTemplate {
+  id          String                   @id @default(uuid()) @db.Uuid
+  name        String
+  description String?
+  eventType   EventType
+  isSystem    Boolean                  @default(false)
+  createdById String?                  @db.Uuid
+  createdBy   User?                    @relation("PlanningTemplateCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  tasks       PlanningTemplateTask[]
+  checklists  EventPlanningChecklist[]
+  createdAt   DateTime                 @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime                 @updatedAt @db.Timestamptz(6)
+
+  @@index([eventType, isSystem])
+}
+
+model PlanningTemplateTask {
+  id              String           @id @default(uuid()) @db.Uuid
+  templateId      String           @db.Uuid
+  template        PlanningTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  title           String
+  description     String?
+  daysBeforeEvent Int?
+  position        Int              @default(0)
+
+  @@index([templateId, position])
+}
+
+model EventPlanningChecklist {
+  id         String            @id @default(uuid()) @db.Uuid
+  eventId    String            @unique @db.Uuid
+  event      Event             @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  templateId String?           @db.Uuid
+  template   PlanningTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  tasks      PlanningTask[]
+  createdAt  DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt  DateTime          @updatedAt @db.Timestamptz(6)
+}
+
+model PlanningTask {
+  id           String                 @id @default(uuid()) @db.Uuid
+  checklistId  String                 @db.Uuid
+  checklist    EventPlanningChecklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+  title        String
+  description  String?
+  assignedToId String?                @db.Uuid
+  assignedTo   User?                  @relation("PlanningTaskAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  dueAt        DateTime?              @db.Timestamptz(6)
+  status       PlanningTaskStatus     @default(NOT_STARTED)
+  completedAt  DateTime?              @db.Timestamptz(6)
+  position     Int                    @default(0)
+  createdAt    DateTime               @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime               @updatedAt @db.Timestamptz(6)
+
+  @@index([checklistId, status, dueAt])
+  @@index([assignedToId, status])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?  @db.Uuid
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorRole  UserRole
+  method     String
+  route      String
+  resourceId String?
+  statusCode Int
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([createdAt])
+  @@index([actorId, createdAt])
 }

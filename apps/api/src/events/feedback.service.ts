@@ -129,8 +129,46 @@ export class FeedbackService {
       }),
     };
   }
+
+  async exportCsv(eventId: string, user: AuthUser): Promise<string> {
+    const feedback = await this.list(eventId, user);
+    const rows = [
+      [
+        'First name',
+        'Last name',
+        'Overall rating',
+        'Content rating',
+        'Organization rating',
+        'Interested in programs',
+        'Comment',
+        'Submitted at',
+      ],
+      ...feedback.map((response) => [
+        response.registration.firstName,
+        response.registration.lastName,
+        String(response.overallRating),
+        response.contentRating === null ? '' : String(response.contentRating),
+        response.organizationRating === null
+          ? ''
+          : String(response.organizationRating),
+        response.interestedInPrograms === null
+          ? ''
+          : response.interestedInPrograms
+            ? 'Yes'
+            : 'No',
+        response.comment ?? '',
+        response.submittedAt.toISOString(),
+      ]),
+    ];
+    return rows.map((row) => row.map(csvCell).join(',')).join('\r\n');
+  }
 }
 
 function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
+}
+
+function csvCell(value: string): string {
+  const safeValue = /^[\t\r ]*[=+\-@]/.test(value) ? `'${value}` : value;
+  return `"${safeValue.replace(/"/g, '""')}"`;
 }

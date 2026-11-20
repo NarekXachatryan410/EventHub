@@ -188,7 +188,7 @@ async function EventContent({
             dangerouslySetInnerHTML={{ __html: event.description }}
           />
         </article>
-        <aside>
+        <aside aria-label="Event registration" id="registration">
           {canRegister || waitlistAvailable ? (
             <RegistrationForm
               eventId={event.id}

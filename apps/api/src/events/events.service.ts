@@ -6,7 +6,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { EventStatus, Prisma, UserRole, type Event } from '@prisma/client';
+import {
+  CrmSyncStatus,
+  EventStatus,
+  Prisma,
+  UserRole,
+  type Event,
+} from '@prisma/client';
 import { createHash, randomBytes } from 'node:crypto';
 import sanitizeHtml from 'sanitize-html';
 import type { AuthUser } from '../auth/auth.types.js';
@@ -229,22 +235,45 @@ export class EventsService {
 
   async update(eventId: string, input: UpdateEventDto, user: AuthUser) {
     await this.access.requireEditAccess(eventId, user);
-    const current = await this.prisma.event.findUniqueOrThrow({
-      where: { id: eventId },
-      select: { startDate: true, endDate: true, registrationDeadline: true },
-    });
-    this.validateDates(
-      {
-        startDate: input.startDate ?? current.startDate.toISOString(),
-        endDate: input.endDate ?? current.endDate.toISOString(),
-        registrationDeadline:
-          input.registrationDeadline ?? current.registrationDeadline.toISOString(),
-      },
-    );
     try {
-      return await this.prisma.event.update({
-        where: { id: eventId },
-        data: this.eventData(input),
+      return await this.prisma.$transaction(async (transaction) => {
+        await transaction.$queryRaw<Array<{ id: string }>>`
+          SELECT "id" FROM "Event" WHERE "id" = ${eventId}::uuid FOR UPDATE
+        `;
+        const current = await transaction.event.findUnique({
+          where: { id: eventId },
+          select: {
+            title: true,
+            slug: true,
+            location: true,
+            startDate: true,
+            endDate: true,
+            registrationDeadline: true,
+            reminderOffsetsHours: true,
+          },
+        });
+        if (!current) throw new NotFoundException('Event not found');
+        this.validateDates({
+          startDate: input.startDate ?? current.startDate.toISOString(),
+          endDate: input.endDate ?? current.endDate.toISOString(),
+          registrationDeadline:
+            input.registrationDeadline ?? current.registrationDeadline.toISOString(),
+        });
+
+        const updated = await transaction.event.update({
+          where: { id: eventId },
+          data: this.eventData(input),
+        });
+        if (
+          input.startDate !== undefined ||
+          input.reminderOffsetsHours !== undefined ||
+          input.title !== undefined ||
+          input.slug !== undefined ||
+          input.location !== undefined
+        ) {
+          await this.emailQueue.synchronizeEventReminders(transaction, updated);
+        }
+        return updated;
       });
     } catch (error) {
       this.throwForUniqueSlug(error);
@@ -332,6 +361,17 @@ export class EventsService {
           status: { in: ['PENDING', 'CONFIRMED', 'WAITLISTED'] },
         },
         data: { status: 'CANCELLED' },
+      });
+      await transaction.crmSyncLog.updateMany({
+        where: { registration: { eventId } },
+        data: {
+          status: CrmSyncStatus.PENDING,
+          attempts: 0,
+          lastAttemptAt: null,
+          errorMessage: null,
+          syncedAt: null,
+          version: { increment: 1 },
+        },
       });
       await transaction.ticket.updateMany({
         where: {
