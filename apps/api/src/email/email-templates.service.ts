@@ -27,7 +27,7 @@ const defaultTemplates: Record<EmailType, Omit<EmailTemplateContent, 'type'>> = 
   },
   POST_EVENT_THANK_YOU: {
     subject: 'Thank you for attending {{eventTitle}}',
-    html: '<p>Hello {{firstName}},</p><p>Thank you for attending {{eventTitle}}.</p><p><a href="{{feedbackUrl}}">Share your feedback</a></p><p><a href="{{materialsUrl}}">Event materials</a></p>',
+    html: '<p>Hello {{firstName}},</p><p>Thank you for attending {{eventTitle}}.</p><p><a href="{{feedbackUrl}}">Share your feedback</a></p>',
   },
   FEEDBACK_REQUEST: {
     subject: 'Share your feedback about {{eventTitle}}',

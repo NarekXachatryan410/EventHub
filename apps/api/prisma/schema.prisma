@@ -29,6 +29,7 @@ enum EventStatus {
   REGISTRATION_CLOSED
   COMPLETED
   CANCELLED
+  ARCHIVED
 }
 
 enum RegistrationStatus {
@@ -60,6 +61,7 @@ enum EmailStatus {
   PENDING
   SENT
   FAILED
+  CANCELLED
 }
 
 enum CrmSyncStatus {
@@ -142,13 +144,14 @@ model EventRegistration {
 }
 
 model Ticket {
-  id             String            @id @default(uuid()) @db.Uuid
-  registrationId String            @unique @db.Uuid
-  registration   EventRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
-  tokenHash      String            @unique
-  status         TicketStatus      @default(VALID)
-  checkIn        CheckIn?
-  createdAt      DateTime          @default(now()) @db.Timestamptz(6)
+  id                String            @id @default(uuid()) @db.Uuid
+  registrationId    String            @unique @db.Uuid
+  registration      EventRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  tokenHash         String            @unique
+  feedbackTokenHash String?           @unique
+  status            TicketStatus      @default(VALID)
+  checkIn           CheckIn?
+  createdAt         DateTime          @default(now()) @db.Timestamptz(6)
 }
 
 model CheckIn {

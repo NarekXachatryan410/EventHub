@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  ArrayUnique,
   IsArray,
   IsBoolean,
   IsEmail,
@@ -91,6 +92,7 @@ export class CreateEventDto {
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(8)
+  @ArrayUnique()
   @IsInt({ each: true })
   @Min(1, { each: true })
   @Max(720, { each: true })

@@ -44,6 +44,7 @@ type RegistrationEvent = Pick<
   | 'registrationEnabled'
   | 'registrationDeadline'
   | 'maxAttendees'
+  | 'reminderOffsetsHours'
   | 'registrationQuestions'
   | 'allowSelfCancellation'
 >;
@@ -61,7 +62,7 @@ export class RegistrationsService {
 
   async register(eventId: string, input: CreateRegistrationDto) {
     const result = await this.createRegistration(eventId, input);
-    await this.dispatchEmail(result.emailLogId);
+    await Promise.all(result.emailLogIds.map((id) => this.dispatchEmail(id)));
     return result.response;
   }
 
@@ -79,7 +80,7 @@ export class RegistrationsService {
     }
 
     const result = await this.createRegistration(eventId, input, false);
-    await this.dispatchEmail(result.emailLogId);
+    await Promise.all(result.emailLogIds.map((id) => this.dispatchEmail(id)));
     return result.response;
   }
 
@@ -88,10 +89,17 @@ export class RegistrationsService {
     return this.prisma.eventRegistration.findMany({
       where: { eventId },
       orderBy: { registeredAt: 'desc' },
-      include: {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        organization: true,
+        status: true,
+        registeredAt: true,
         ticket: {
           select: {
-            id: true,
             status: true,
             checkIn: { select: { checkedInAt: true, checkedInBy: true } },
           },
@@ -111,9 +119,23 @@ export class RegistrationsService {
     await this.access.requireManageAccess(registration.eventId, user);
     return this.prisma.eventRegistration.findUniqueOrThrow({
       where: { id: registrationId },
-      include: {
+      select: {
+        id: true,
+        eventId: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        organization: true,
+        interestedInPrograms: true,
+        additionalAnswers: true,
+        status: true,
+        marketingConsent: true,
+        registeredAt: true,
         ticket: {
-          include: {
+          select: {
+            id: true,
+            status: true,
             checkIn: { select: { checkedInAt: true, checkedInBy: true } },
           },
         },
@@ -206,6 +228,14 @@ export class RegistrationsService {
         payload: this.emailPayload(registration, registration.event),
       });
       const emailLogIds = [emailLog.id];
+      await transaction.emailLog.updateMany({
+        where: {
+          registrationId: registration.id,
+          type: EmailType.EVENT_REMINDER,
+          status: 'PENDING',
+        },
+        data: { status: 'CANCELLED', errorMessage: 'Registration cancelled' },
+      });
       if (
         registration.status === RegistrationStatus.CONFIRMED &&
         registration.event.status === EventStatus.PUBLISHED &&
@@ -254,6 +284,14 @@ export class RegistrationsService {
             },
           );
           emailLogIds.push(promotionEmail.id);
+          emailLogIds.push(
+            ...(await this.scheduleReminders(
+              transaction,
+              nextWaitlisted,
+              registration.event,
+              ticketToken,
+            )),
+          );
         }
       }
       return emailLogIds;
@@ -366,15 +404,26 @@ export class RegistrationsService {
           idempotencyKey: `registration-${status.toLowerCase()}:${registration.id}`,
           payload,
         });
+        const emailLogIds = [emailLog.id];
+        if (status === RegistrationStatus.CONFIRMED) {
+          emailLogIds.push(
+            ...(await this.scheduleReminders(
+              transaction,
+              registration,
+              event,
+              ticketToken,
+            )),
+          );
+        }
         return {
           registration,
           status,
-          emailLogId: emailLog.id,
+          emailLogIds,
         };
       });
 
       return {
-        emailLogId: result.emailLogId,
+        emailLogIds: result.emailLogIds,
         response: {
           id: result.registration.id,
           status: result.status,
@@ -426,9 +475,6 @@ export class RegistrationsService {
     const webOrigin = (
       this.config.get<string>('WEB_ORIGIN') ?? 'http://localhost:3000'
     ).replace(/\/+$/, '');
-    const apiOrigin = (
-      this.config.get<string>('API_PUBLIC_URL') ?? 'http://localhost:4000/api'
-    ).replace(/\/+$/, '');
     const eventUrl = `${webOrigin}/events/${event.slug}`;
     return {
       to: registration.email,
@@ -439,13 +485,44 @@ export class RegistrationsService {
       eventLocation: event.location,
       eventUrl,
       ticketUrl: tokens.ticketToken
-        ? `${apiOrigin}/tickets/${tokens.ticketToken}`
+        ? `${webOrigin}/tickets/${encodeURIComponent(tokens.ticketToken)}`
         : eventUrl,
       cancellationUrl: tokens.cancellationToken
         ? `${webOrigin}/registrations/cancel?registrationId=${registration.id}&token=${encodeURIComponent(tokens.cancellationToken)}`
         : eventUrl,
       ...(tokens.qrCodeBase64 ? { qrCodeBase64: tokens.qrCodeBase64 } : {}),
     };
+  }
+
+  private async scheduleReminders(
+    transaction: Prisma.TransactionClient,
+    registration: {
+      id: string;
+      firstName: string;
+      lastName: string;
+      email: string;
+    },
+    event: RegistrationEvent,
+    ticketToken: string,
+  ): Promise<string[]> {
+    const now = Date.now();
+    if (event.startDate.getTime() <= now) return [];
+    const scheduledIds: string[] = [];
+    for (const offset of new Set(event.reminderOffsetsHours)) {
+      const scheduledAt = new Date(
+        event.startDate.getTime() - offset * 60 * 60 * 1000,
+      );
+      if (scheduledAt.getTime() <= now) continue;
+      const log = await this.emailQueue.createOutboxEntry(transaction, {
+        registrationId: registration.id,
+        type: EmailType.EVENT_REMINDER,
+        idempotencyKey: `event-reminder:${registration.id}:${offset}`,
+        scheduledAt,
+        payload: this.emailPayload(registration, event, { ticketToken }),
+      });
+      scheduledIds.push(log.id);
+    }
+    return scheduledIds;
   }
 
   private async dispatchEmail(emailLogId: string): Promise<void> {
@@ -491,7 +568,12 @@ function validateAnswers(
   const validated: Record<string, Prisma.InputJsonValue> = {};
   for (const question of questionList) {
     const value = submitted[question.key];
-    if (value === undefined || value === null || value === '') {
+    if (
+      value === undefined ||
+      value === null ||
+      value === '' ||
+      (Array.isArray(value) && value.length === 0)
+    ) {
       if (question.required) {
         throw new BadRequestException(`${question.label} is required`);
       }

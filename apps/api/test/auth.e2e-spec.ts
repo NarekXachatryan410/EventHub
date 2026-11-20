@@ -231,6 +231,40 @@ describe('Staff authentication and management (e2e)', () => {
       .expect(403);
   });
 
+  it('prevents Check-in Staff from exporting registrations, viewing registration details, or reading email logs', async () => {
+    const jwt = app.get(JwtService);
+    const cookie = `eventhub_auth=${await jwt.signAsync({
+      sub: checkInId,
+      role: UserRole.CHECK_IN_STAFF,
+    })}`;
+
+    await request(app.getHttpServer())
+      .get(`/api/events/${adminId}/registrations/export`)
+      .set('Cookie', cookie)
+      .expect(403);
+    await request(app.getHttpServer())
+      .get(`/api/registrations/${adminId}`)
+      .set('Cookie', cookie)
+      .expect(403);
+    await request(app.getHttpServer())
+      .get('/api/email-logs')
+      .set('Cookie', cookie)
+      .expect(403);
+    await request(app.getHttpServer())
+      .get('/api/events/manage/check-in-staff')
+      .set('Cookie', cookie)
+      .expect(403);
+    await request(app.getHttpServer())
+      .put(`/api/events/${adminId}/check-in-staff`)
+      .set('Cookie', cookie)
+      .send({ staffIds: [] })
+      .expect(403);
+    await request(app.getHttpServer())
+      .patch(`/api/events/${adminId}/archive`)
+      .set('Cookie', cookie)
+      .expect(403);
+  });
+
   it('allows the Super Admin to manage staff but never creates another Super Admin', async () => {
     const list = await request(app.getHttpServer())
       .get('/api/users')

@@ -46,7 +46,7 @@ export class RegistrationsController {
 
   @Get('events/:eventId/registrations/export')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN, UserRole.EVENT_MANAGER, UserRole.CHECK_IN_STAFF)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.EVENT_MANAGER)
   async export(
     @Param('eventId', ParseUUIDPipe) eventId: string,
     @CurrentUser() user: AuthenticatedRequest['user'],
@@ -72,7 +72,7 @@ export class RegistrationsController {
 
   @Get('registrations/:registrationId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN, UserRole.EVENT_MANAGER, UserRole.CHECK_IN_STAFF)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.EVENT_MANAGER)
   getById(
     @Param('registrationId', ParseUUIDPipe) registrationId: string,
     @CurrentUser() user: AuthenticatedRequest['user'],

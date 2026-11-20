@@ -7,6 +7,7 @@ import {
   ParseEnumPipe,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -17,6 +18,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { Roles } from '../auth/roles.decorator.js';
 import { RolesGuard } from '../auth/roles.guard.js';
 import { CreateEventDto } from './dto/create-event.dto.js';
+import { AssignCheckInStaffDto } from './dto/assign-check-in-staff.dto.js';
 import { UpdateEventDto } from './dto/update-event.dto.js';
 import { EventsService } from './events.service.js';
 
@@ -37,6 +39,24 @@ export class EventsController {
   @Roles(UserRole.SUPER_ADMIN, UserRole.EVENT_MANAGER, UserRole.CHECK_IN_STAFF)
   listManaged(@CurrentUser() user: AuthenticatedRequest['user']) {
     return this.eventsService.listManaged(user);
+  }
+
+  @Get('manage/check-in-staff')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.EVENT_MANAGER)
+  listCheckInStaff() {
+    return this.eventsService.listCheckInStaff();
+  }
+
+  @Put(':id/check-in-staff')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.EVENT_MANAGER)
+  assignCheckInStaff(
+    @Param('id') id: string,
+    @Body() input: AssignCheckInStaffDto,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    return this.eventsService.assignCheckInStaff(id, input.staffIds, user);
   }
 
   @Post()
@@ -100,6 +120,16 @@ export class EventsController {
     return this.eventsService.cancel(id, user);
   }
 
+  @Patch(':id/complete')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.EVENT_MANAGER)
+  complete(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    return this.eventsService.complete(id, user);
+  }
+
   @Patch(':id/close-registration')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SUPER_ADMIN, UserRole.EVENT_MANAGER)
@@ -108,6 +138,26 @@ export class EventsController {
     @CurrentUser() user: AuthenticatedRequest['user'],
   ) {
     return this.eventsService.closeRegistration(id, user);
+  }
+
+  @Patch(':id/archive')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.EVENT_MANAGER)
+  archive(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    return this.eventsService.archive(id, user);
+  }
+
+  @Patch(':id/restore')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.EVENT_MANAGER)
+  restore(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    return this.eventsService.restore(id, user);
   }
 
   @Get(':slug')

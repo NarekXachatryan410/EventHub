@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { RegistrationForm } from "@/components/events/registration-form";
+import { EventCoverImage } from "@/components/events/event-cover-image";
 import { apiBaseUrl, siteUrl } from "@/lib/api";
 
 type PublicEvent = {
@@ -148,8 +149,7 @@ async function EventContent({
         ← All events
       </Link>
       {event.coverImage && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
+        <EventCoverImage
           alt=""
           className="mt-8 max-h-[28rem] w-full rounded-2xl object-cover"
           src={event.coverImage}

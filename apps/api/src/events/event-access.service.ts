@@ -11,7 +11,6 @@ export class EventAccessService {
     const event = await this.prisma.event.findUnique({
       where: { id: eventId },
       select: {
-        organizerId: true,
         staffAssignments: {
           where: { staffId: user.sub },
           select: { id: true },
@@ -22,10 +21,11 @@ export class EventAccessService {
       throw new NotFoundException('Event not found');
     }
 
+    if (user.role === UserRole.SUPER_ADMIN || user.role === UserRole.EVENT_MANAGER) {
+      return;
+    }
     if (
-      user.role === UserRole.SUPER_ADMIN ||
-      user.role === UserRole.EVENT_MANAGER ||
-      event.organizerId === user.sub ||
+      user.role === UserRole.CHECK_IN_STAFF &&
       event.staffAssignments.length > 0
     ) {
       return;
@@ -76,9 +76,10 @@ export class EventAccessService {
     }
     if (
       event.status === EventStatus.CANCELLED ||
-      event.status === EventStatus.COMPLETED
+      event.status === EventStatus.COMPLETED ||
+      event.status === EventStatus.ARCHIVED
     ) {
-      throw new ForbiddenException('Completed or cancelled events cannot be published');
+      throw new ForbiddenException('Completed, cancelled, or archived events cannot be published');
     }
   }
 }

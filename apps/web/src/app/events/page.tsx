@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { apiBaseUrl } from "@/lib/api";
+import { EventCoverImage } from "@/components/events/event-cover-image";
 
 export const metadata = {
   title: "Academy Events | EventHub",
@@ -57,12 +58,7 @@ async function EventsList() {
           key={event.slug}
         >
           {event.coverImage && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              alt=""
-              className="h-52 w-full object-cover"
-              src={event.coverImage}
-            />
+            <EventCoverImage alt="" className="h-52 w-full object-cover" src={event.coverImage} />
           )}
           <div className="p-6">
             <p className="text-sm font-medium text-indigo-700">

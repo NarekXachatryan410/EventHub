@@ -1,57 +1,48 @@
 "use client";
 
 import {
-  ArrowUpRight,
+  ArrowRight,
   CalendarDays,
-  CircleHelp,
-  LogOut,
-  ShieldCheck,
+  CheckCircle2,
+  CircleAlert,
+  Clock3,
+  Plus,
+  Users,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import { publicApiBaseUrl } from "@/lib/api";
-
-type StaffUser = {
-  id: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  role: string;
-};
-
-const roleLabels: Record<string, string> = {
-  SUPER_ADMIN: "Super Admin",
-  EVENT_MANAGER: "Event Manager",
-  CHECK_IN_STAFF: "Check-in Staff",
-};
+import { useEffect, useMemo, useState } from "react";
+import { useStaffUser } from "@/components/auth/staff-shell";
+import {
+  formatDate,
+  roleLabel,
+  staffApi,
+  type StaffEvent,
+} from "@/lib/staff-api";
 
 export function StaffDashboard() {
-  const router = useRouter();
-  const [user, setUser] = useState<StaffUser | null>(null);
+  const user = useStaffUser();
+  const [events, setEvents] = useState<StaffEvent[]>([]);
+  const [checkedInCount, setCheckedInCount] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   useEffect(() => {
     let active = true;
-    fetch(`${publicApiBaseUrl}/api/auth/me`, {
-      credentials: "include",
-      cache: "no-store",
-    })
-      .then(async (response) => {
-        if (response.status === 401) {
-          router.replace("/login");
-          return null;
-        }
-        if (!response.ok) {
-          throw new Error("We couldn't load your staff account.");
-        }
-        return (await response.json()) as StaffUser;
-      })
-      .then((currentUser) => {
-        if (active && currentUser) {
-          setUser(currentUser);
+    staffApi<StaffEvent[]>("/events/manage")
+      .then(async (managedEvents) => {
+        const checkInCounts = await Promise.all(
+          managedEvents.map(async (event) => {
+            const rows = await staffApi<unknown[]>(
+              `/events/${event.id}/check-ins`,
+            );
+            return rows.length;
+          }),
+        );
+        if (active) {
+          setEvents(managedEvents);
+          setCheckedInCount(
+            checkInCounts.reduce((total, count) => total + count, 0),
+          );
         }
       })
       .catch((loadError: unknown) => {
@@ -59,185 +50,185 @@ export function StaffDashboard() {
           setError(
             loadError instanceof Error
               ? loadError.message
-              : "We couldn't load your staff account.",
+              : "Could not load your events.",
           );
         }
       })
       .finally(() => {
-        if (active) {
-          setIsLoading(false);
-        }
+        if (active) setLoading(false);
       });
-
     return () => {
       active = false;
     };
-  }, [router]);
+  }, []);
 
-  async function logout() {
-    setIsLoggingOut(true);
-    setError(null);
-    try {
-      const response = await fetch(`${publicApiBaseUrl}/api/auth/logout`, {
-        method: "POST",
-        credentials: "include",
-      });
-      if (!response.ok) {
-        throw new Error("We couldn't end your session. Please try again.");
-      }
-      router.replace("/login");
-      router.refresh();
-    } catch (logoutError: unknown) {
-      setError(
-        logoutError instanceof Error
-          ? logoutError.message
-          : "We couldn't end your session. Please try again.",
-      );
-      setIsLoggingOut(false);
-    }
-  }
+  const upcoming = useMemo(
+    () =>
+      events.filter(
+        (event) =>
+          new Date(event.startDate) > new Date() &&
+          event.status !== "CANCELLED",
+      ).length,
+    [events],
+  );
+  const registrationTotal = useMemo(
+    () => events.reduce((total, event) => total + (event._count?.registrations ?? 0), 0),
+    [events],
+  );
+  const published = useMemo(
+    () => events.filter((event) => event.status === "PUBLISHED").length,
+    [events],
+  );
 
-  if (isLoading) {
-    return (
-      <main
-        aria-label="Loading staff workspace"
-        className="flex min-h-screen items-center justify-center bg-[#f5f6fa] px-6"
-        role="status"
-      >
-        <div className="rounded-2xl border border-slate-200 bg-white px-6 py-5 text-sm text-slate-600 shadow-sm">
-          Checking your secure staff session…
-        </div>
-      </main>
-    );
-  }
-
-  if (error && !user) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-[#f5f6fa] px-6">
-        <section
-          aria-labelledby="session-error-title"
-          className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-sm"
-        >
-          <CircleHelp aria-hidden="true" className="mx-auto size-9 text-amber-600" />
-          <h1
-            className="mt-4 text-xl font-semibold text-slate-950"
-            id="session-error-title"
-          >
-            Workspace unavailable
-          </h1>
-          <p className="mt-2 text-sm leading-6 text-slate-600" role="alert">
-            {error}
-          </p>
-          <button
-            className="mt-6 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
-            onClick={() => window.location.reload()}
-            type="button"
-          >
-            Try again
-          </button>
-        </section>
-      </main>
-    );
-  }
-
-  if (!user) {
-    return null;
-  }
+  const stats = [
+    { label: "Total events", value: loading ? "—" : events.length, icon: CalendarDays, tone: "indigo" },
+    { label: "Upcoming", value: loading ? "—" : upcoming, icon: Clock3, tone: "blue" },
+    { label: "Registrations", value: loading ? "—" : registrationTotal, icon: Users, tone: "violet" },
+    { label: "Checked in", value: loading ? "—" : checkedInCount ?? "—", icon: CheckCircle2, tone: "emerald" },
+  ];
 
   return (
-    <main className="min-h-screen bg-[#f5f6fa]">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-4 sm:px-8">
-          <Link
-            className="inline-flex items-center gap-2.5 text-lg font-semibold tracking-tight text-slate-950"
-            href="/dashboard"
-          >
-            <span className="flex size-9 items-center justify-center rounded-xl bg-indigo-600 text-white">
-              <CalendarDays aria-hidden="true" className="size-4" />
-            </span>
-            Event<span className="-ml-2 text-indigo-600">Hub</span>
-          </Link>
-          <div className="flex items-center gap-3">
-            <div className="hidden text-right sm:block">
-              <p className="text-sm font-semibold text-slate-900">
-                {user.firstName} {user.lastName}
-              </p>
-              <p className="text-xs text-slate-500">
-                {roleLabels[user.role] ?? user.role}
-              </p>
-            </div>
-            <button
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 px-3.5 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-60"
-              disabled={isLoggingOut}
-              onClick={logout}
-              type="button"
-            >
-              <LogOut aria-hidden="true" className="size-4" />
-              <span className="hidden sm:inline">
-                {isLoggingOut ? "Signing out…" : "Sign out"}
-              </span>
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <div className="mx-auto max-w-7xl px-5 py-10 sm:px-8 sm:py-14">
-        {error && (
-          <p
-            className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
-            role="alert"
-          >
-            {error}
-          </p>
-        )}
-        <div className="rounded-[2rem] bg-[#11152d] px-6 py-10 text-white shadow-xl shadow-indigo-950/10 sm:px-10 sm:py-12">
-          <div className="flex size-12 items-center justify-center rounded-2xl bg-white/10 text-indigo-200">
-            <ShieldCheck aria-hidden="true" className="size-6" />
-          </div>
-          <p className="mt-7 text-sm font-medium text-indigo-200">
-            {roleLabels[user.role] ?? "EventHub staff"}
-          </p>
-          <h1 className="mt-2 max-w-2xl text-3xl font-semibold tracking-tight sm:text-4xl">
-            Welcome to your workspace, {user.firstName}.
+    <main>
+      <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
+        <div>
+          <p className="text-sm font-medium text-indigo-700">{user ? roleLabel(user.role) : "Staff workspace"}</p>
+          <h1 className="mt-1 text-3xl font-semibold tracking-tight text-slate-950">
+            Good {greeting()}, {user?.firstName ?? "there"}
           </h1>
-          <p className="mt-4 max-w-2xl leading-7 text-slate-300">
-            You’re signed in securely. Your event-management workspace is
-            taking shape — start by exploring the events available to your
-            Academy.
+          <p className="mt-2 text-sm text-slate-600">
+            Here’s what’s happening across your Academy events.
           </p>
+        </div>
+        {user && user.role !== "CHECK_IN_STAFF" && (
           <Link
-            className="mt-8 inline-flex h-11 items-center gap-2 rounded-xl bg-white px-4 text-sm font-semibold text-indigo-950 transition hover:bg-indigo-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-            href="/events"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+            href="/dashboard/events/new"
           >
-            Explore events
-            <ArrowUpRight aria-hidden="true" className="size-4" />
+            <Plus aria-hidden="true" className="size-4" />
+            Create event
+          </Link>
+        )}
+      </div>
+
+      {error && (
+        <p className="mt-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">
+          {error}
+        </p>
+      )}
+
+      <section aria-label="Event overview" className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {stats.map((stat) => {
+          const Icon = stat.icon;
+          const tones: Record<string, string> = {
+            indigo: "bg-indigo-50 text-indigo-700",
+            blue: "bg-sky-50 text-sky-700",
+            violet: "bg-violet-50 text-violet-700",
+            emerald: "bg-emerald-50 text-emerald-700",
+          };
+          return (
+            <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" key={stat.label}>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-slate-600">{stat.label}</p>
+                <span className={`flex size-10 items-center justify-center rounded-xl ${tones[stat.tone]}`}>
+                  <Icon aria-hidden="true" className="size-[18px]" />
+                </span>
+              </div>
+              <p className="mt-5 text-3xl font-semibold tracking-tight text-slate-950">{stat.value}</p>
+            </article>
+          );
+        })}
+      </section>
+
+      <section aria-labelledby="events-heading" className="mt-9">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-950" id="events-heading">Your events</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              {loading ? "Loading events…" : `${published} published · ${upcoming} upcoming`}
+            </p>
+          </div>
+          <Link className="inline-flex items-center gap-1 text-sm font-semibold text-indigo-700 hover:text-indigo-900" href={user?.role === "CHECK_IN_STAFF" ? "/dashboard/check-in" : "/dashboard/events"}>
+            {user?.role === "CHECK_IN_STAFF" ? "Open check-in" : "All events"}
+            <ArrowRight aria-hidden="true" className="size-4" />
           </Link>
         </div>
 
-        <section aria-labelledby="account-heading" className="mt-8">
-          <h2 className="text-lg font-semibold text-slate-950" id="account-heading">
-            Account
-          </h2>
-          <div className="mt-4 grid gap-4 rounded-2xl border border-slate-200 bg-white p-5 sm:grid-cols-2 sm:p-6">
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                Signed in as
-              </p>
-              <p className="mt-1 break-all text-sm font-medium text-slate-900">
-                {user.email}
-              </p>
+        <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          {loading ? (
+            <div className="space-y-3 p-5" role="status">
+              <div className="h-14 animate-pulse rounded-xl bg-slate-100" />
+              <div className="h-14 animate-pulse rounded-xl bg-slate-100" />
             </div>
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                Access level
-              </p>
-              <p className="mt-1 text-sm font-medium text-slate-900">
-                {roleLabels[user.role] ?? user.role}
-              </p>
+          ) : events.length === 0 ? (
+            <div className="px-6 py-14 text-center">
+              <CalendarDays aria-hidden="true" className="mx-auto size-9 text-slate-300" />
+              <h3 className="mt-3 font-semibold text-slate-900">No events yet</h3>
+              <p className="mt-1 text-sm text-slate-500">Events assigned to you will show up here.</p>
+              {user && user.role !== "CHECK_IN_STAFF" && (
+                <Link className="mt-5 inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white" href="/dashboard/events/new">
+                  <Plus aria-hidden="true" className="size-4" /> Create your first event
+                </Link>
+              )}
             </div>
-          </div>
-        </section>
-      </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {events.slice(0, 6).map((event) => (
+                <article className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between" key={event.id}>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="truncate font-semibold text-slate-900">{event.title}</h3>
+                      <StatusBadge status={event.status} />
+                    </div>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {formatDate(event.startDate)} <span className="px-1">·</span> {event.location}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-4">
+                    <span className="text-sm text-slate-500">
+                      <strong className="text-slate-900">{event._count?.registrations ?? 0}</strong> registrations
+                    </span>
+                    <Link
+                      aria-label={user?.role === "CHECK_IN_STAFF" ? `Check in to ${event.title}` : `Manage ${event.title}`}
+                      className="flex size-9 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+                      href={user?.role === "CHECK_IN_STAFF" ? `/dashboard/check-in?eventId=${event.id}` : `/dashboard/events/${event.id}`}
+                    >
+                      <ArrowRight aria-hidden="true" className="size-4" />
+                    </Link>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
     </main>
   );
+}
+
+export function StatusBadge({ status }: { status: string }) {
+  const style =
+    status === "PUBLISHED"
+      ? "bg-emerald-50 text-emerald-700"
+      : status === "CANCELLED"
+        ? "bg-red-50 text-red-700"
+        : status === "COMPLETED"
+          ? "bg-sky-50 text-sky-700"
+          : status === "REGISTRATION_CLOSED"
+            ? "bg-amber-50 text-amber-700"
+            : status === "ARCHIVED"
+              ? "bg-slate-200 text-slate-700"
+            : "bg-slate-100 text-slate-600";
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${style}`}>
+      {status === "CANCELLED" && <CircleAlert aria-hidden="true" className="size-3" />}
+      {status.replaceAll("_", " ")}
+    </span>
+  );
+}
+
+function greeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return "morning";
+  if (hour < 18) return "afternoon";
+  return "evening";
 }

@@ -74,6 +74,7 @@ describe('CheckInsService', () => {
     );
     expect(result.valid).toBe(true);
     expect(JSON.stringify(result)).not.toContain(token);
+    expect(result.qrCodeDataUrl).toMatch(/^data:image\/png;base64,/);
   });
 
   it('records a check-in once under a locked ticket row', async () => {

@@ -20,7 +20,7 @@ export class FeedbackService {
 
   async submit(input: SubmitFeedbackDto) {
     const ticket = await this.prisma.ticket.findUnique({
-      where: { tokenHash: hashToken(input.ticketToken) },
+      where: { feedbackTokenHash: hashToken(input.feedbackToken) },
       select: {
         status: true,
         checkIn: { select: { id: true } },

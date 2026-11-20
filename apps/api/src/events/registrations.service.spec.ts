@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import { ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { EmailType, EventStatus, RegistrationStatus } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { RegistrationsService } from './registrations.service.js';
@@ -24,12 +24,29 @@ describe('RegistrationsService', () => {
     dispatchLog: jest.Mock;
   };
 
-  const input: CreateRegistrationDto = {
+  const input = {
     firstName: 'Ada',
     lastName: 'Lovelace',
     email: 'ADA@example.com',
     marketingConsent: false,
-  };
+  } satisfies CreateRegistrationDto;
+
+  function registrationEvent(registrationQuestions: unknown = null) {
+    return {
+      id: eventId,
+      slug: 'academy-open-day',
+      title: 'Academy Open Day',
+      location: 'Main campus',
+      startDate: new Date('2030-05-10T09:00:00.000Z'),
+      status: EventStatus.PUBLISHED,
+      registrationEnabled: true,
+      registrationDeadline: new Date('2030-05-09T09:00:00.000Z'),
+      maxAttendees: 10,
+      reminderOffsetsHours: [24, 2],
+      registrationQuestions,
+      allowSelfCancellation: true,
+    };
+  }
 
   beforeEach(() => {
     transaction = {
@@ -48,19 +65,7 @@ describe('RegistrationsService', () => {
         findUnique: jest.fn().mockResolvedValue(null),
       },
     };
-    transaction.event.findUnique.mockResolvedValue({
-      id: eventId,
-      slug: 'academy-open-day',
-      title: 'Academy Open Day',
-      location: 'Main campus',
-      startDate: new Date('2030-05-10T09:00:00.000Z'),
-      status: EventStatus.PUBLISHED,
-      registrationEnabled: true,
-      registrationDeadline: new Date('2030-05-09T09:00:00.000Z'),
-      maxAttendees: 10,
-      registrationQuestions: null,
-      allowSelfCancellation: true,
-    });
+    transaction.event.findUnique.mockResolvedValue(registrationEvent());
 
     emailQueue = {
       createOutboxEntry: jest
@@ -96,6 +101,11 @@ describe('RegistrationsService', () => {
     expect(emailQueue.createOutboxEntry.mock.calls[0]?.[1].type).toBe(
       EmailType.REGISTRATION_CONFIRMATION,
     );
+    expect(
+      emailQueue.createOutboxEntry.mock.calls.filter(
+        (call) => call[1].type === EmailType.EVENT_REMINDER,
+      ),
+    ).toHaveLength(2);
     expect(emailQueue.dispatchLog).toHaveBeenCalledWith('email-log-id');
   });
 
@@ -136,6 +146,52 @@ describe('RegistrationsService', () => {
     await expect(service.register(eventId, input)).rejects.toBeInstanceOf(
       ConflictException,
     );
+    expect(transaction.eventRegistration.create).not.toHaveBeenCalled();
+  });
+
+  it('accepts a single selected value for a multiple-choice question', async () => {
+    transaction.event.findUnique.mockResolvedValue(
+      registrationEvent([
+        {
+          key: 'programs',
+          label: 'Programs',
+          type: 'MULTIPLE_CHOICE',
+          required: true,
+          options: ['Web', 'Design'],
+        },
+      ]),
+    );
+
+    await service.register(eventId, {
+      ...input,
+      additionalAnswers: { programs: ['Web'] },
+    });
+
+    expect(
+      transaction.eventRegistration.create.mock.calls[0]?.[0].data
+        .additionalAnswers,
+    ).toEqual({ programs: ['Web'] });
+  });
+
+  it('requires at least one selection for required multiple-choice questions', async () => {
+    transaction.event.findUnique.mockResolvedValue(
+      registrationEvent([
+        {
+          key: 'programs',
+          label: 'Programs',
+          type: 'MULTIPLE_CHOICE',
+          required: true,
+          options: ['Web', 'Design'],
+        },
+      ]),
+    );
+
+    await expect(
+      service.register(eventId, {
+        ...input,
+        additionalAnswers: { programs: [] },
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
     expect(transaction.eventRegistration.create).not.toHaveBeenCalled();
   });
 });

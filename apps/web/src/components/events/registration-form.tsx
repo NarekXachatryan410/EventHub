@@ -38,12 +38,14 @@ export function RegistrationForm({
     setIsSubmitting(true);
 
     const additionalAnswers = Object.fromEntries(
-      questions.map((question) => [
-        question.key,
-        formData.getAll(`question:${question.key}`).length > 1
-          ? formData.getAll(`question:${question.key}`)
-          : formData.get(`question:${question.key}`),
-      ]),
+      questions.map((question) => {
+        const values = formData.getAll(`question:${question.key}`);
+        const answer =
+          question.type === "MULTIPLE_CHOICE"
+            ? values.filter((value): value is string => typeof value === "string")
+            : values[0] ?? null;
+        return [question.key, answer];
+      }),
     );
 
     try {

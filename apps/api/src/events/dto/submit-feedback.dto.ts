@@ -12,7 +12,7 @@ import {
 export class SubmitFeedbackDto {
   @IsString()
   @MinLength(1)
-  ticketToken!: string;
+  feedbackToken!: string;
 
   @IsInt()
   @Min(1)

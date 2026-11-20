@@ -8,6 +8,7 @@ import {
   TicketStatus,
 } from '@prisma/client';
 import { createHash } from 'node:crypto';
+import QRCode from 'qrcode';
 import type { AuthUser } from '../auth/auth.types.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { EventAccessService } from './event-access.service.js';
@@ -46,6 +47,11 @@ export class CheckInsService {
       valid: isValid,
       status: ticket.status,
       checkedInAt: ticket.checkIn?.checkedInAt ?? null,
+      qrCodeDataUrl: await QRCode.toDataURL(token, {
+        errorCorrectionLevel: 'M',
+        margin: 2,
+        width: 320,
+      }),
       attendee: {
         firstName: ticket.registration.firstName,
         lastName: ticket.registration.lastName,

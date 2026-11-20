@@ -1,6 +1,7 @@
 import { jest } from '@jest/globals';
 import { ForbiddenException } from '@nestjs/common';
 import { EventStatus, RegistrationStatus, TicketStatus } from '@prisma/client';
+import { createHash } from 'node:crypto';
 import { FeedbackService } from './feedback.service.js';
 
 describe('FeedbackService', () => {
@@ -38,14 +39,24 @@ describe('FeedbackService', () => {
   });
 
   it('accepts feedback only for a checked-in attendee after the event', async () => {
+    const feedbackToken = 'feedback-token';
     await expect(
       service.submit({
-        ticketToken: 'ticket-token',
+        feedbackToken,
         overallRating: 5,
         interestedInPrograms: false,
       }),
     ).resolves.toEqual({ id: 'feedback-id' });
 
+    expect(prisma.ticket.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          feedbackTokenHash: createHash('sha256')
+            .update(feedbackToken)
+            .digest('hex'),
+        },
+      }),
+    );
     expect(prisma.feedback.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -74,7 +85,7 @@ describe('FeedbackService', () => {
     });
 
     await expect(
-      service.submit({ ticketToken: 'ticket-token', overallRating: 5 }),
+      service.submit({ feedbackToken: 'feedback-token', overallRating: 5 }),
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(prisma.feedback.create).not.toHaveBeenCalled();
   });

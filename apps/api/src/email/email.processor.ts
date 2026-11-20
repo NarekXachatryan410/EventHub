@@ -33,7 +33,7 @@ export class EmailProcessor extends WorkerHost {
     if (!log) {
       throw new Error(`Email log ${job.data.emailLogId} no longer exists`);
     }
-    if (log.status === 'SENT') {
+    if (log.status !== 'PENDING') {
       return;
     }
     if (!log.payloadCiphertext) {
