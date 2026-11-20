@@ -1,6 +1,7 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
 import { Injectable, Logger } from '@nestjs/common';
+import { UnrecoverableError } from 'bullmq';
 import type { Job } from 'bullmq';
 import { Resend } from 'resend';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -88,7 +89,11 @@ export class EmailProcessor extends WorkerHost {
       });
     } catch (error) {
       const attempts = job.attemptsMade + 1;
-      const isFinalAttempt = attempts >= (job.opts.attempts ?? 1);
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown email error';
+      const permanentSenderError = isPermanentSenderError(errorMessage);
+      const isFinalAttempt =
+        permanentSenderError || attempts >= (job.opts.attempts ?? 1);
       await this.prisma.emailLog.update({
         where: { id: log.id },
         data: {
@@ -97,8 +102,7 @@ export class EmailProcessor extends WorkerHost {
           ...(isFinalAttempt
             ? {
                 status: 'FAILED',
-                errorMessage:
-                  error instanceof Error ? error.message : 'Unknown email error',
+                errorMessage,
               }
             : {}),
         },
@@ -107,7 +111,16 @@ export class EmailProcessor extends WorkerHost {
         `Email delivery attempt ${attempts} failed for log ${log.id}`,
         error instanceof Error ? error.stack : undefined,
       );
+      if (permanentSenderError) {
+        throw new UnrecoverableError(errorMessage);
+      }
       throw error;
     }
   }
+}
+
+export function isPermanentSenderError(message: string): boolean {
+  return /domain is not verified|sender address is not verified|only send testing emails to your own email address|verify a domain at resend\.com\/domains/i.test(
+    message,
+  );
 }

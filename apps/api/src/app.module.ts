@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
+import { resolve } from 'node:path';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module.js';
@@ -18,7 +19,14 @@ import { SecurityModule } from './security/security.module.js';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true, validate: validateEnvironment }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: [
+        resolve(process.cwd(), 'apps/api/.env'),
+        resolve(process.cwd(), '.env'),
+      ],
+      validate: validateEnvironment,
+    }),
     ScheduleModule.forRoot(),
     SecurityModule,
     ThrottlerModule.forRootAsync({
