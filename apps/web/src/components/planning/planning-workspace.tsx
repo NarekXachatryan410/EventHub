@@ -447,6 +447,64 @@ export function PlanningWorkspace() {
         </div>
       </section>
 
+      <section
+        aria-labelledby="planning-templates-heading"
+        className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+      >
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2
+              className="font-semibold text-slate-950"
+              id="planning-templates-heading"
+            >
+              Planning templates
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Reusable plans are listed here and can be applied to events of the same type.
+            </p>
+          </div>
+          <span className="text-sm text-slate-500">
+            {templates.length} {templates.length === 1 ? "template" : "templates"}
+          </span>
+        </div>
+        {loading ? (
+          <p className="mt-4 text-sm text-slate-500" role="status">
+            Loading templates…
+          </p>
+        ) : templates.length > 0 ? (
+          <ul className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {templates.map((template) => (
+              <li
+                className="rounded-xl border border-slate-200 p-4"
+                key={template.id}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <h3 className="font-medium text-slate-900">{template.name}</h3>
+                  {template.isSystem && (
+                    <span className="shrink-0 rounded-full bg-indigo-50 px-2 py-1 text-[11px] font-semibold text-indigo-700">
+                      Recommended
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 text-xs font-medium text-slate-500">
+                  {labelForType(template.eventType)} · {template.tasks.length}{" "}
+                  {template.tasks.length === 1 ? "task" : "tasks"}
+                </p>
+                {template.description && (
+                  <p className="mt-2 line-clamp-2 text-sm text-slate-600">
+                    {template.description}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-4 rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-slate-500">
+            No templates yet. Create a template to make it available here.
+          </p>
+        )}
+      </section>
+
       {loading || checklistLoading ? (
         <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-8 text-sm text-slate-500" role="status">
           Loading planning workspace…
