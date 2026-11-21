@@ -60,7 +60,8 @@ describe('validateEnvironment', () => {
     expect(() =>
       validateEnvironment({
         NODE_ENV: 'development',
-        RESEND_FROM_EMAIL: 'resend-domain-verification=abc.example.com',
+        RESEND_FROM_EMAIL:
+          'EventHub <tickets@resend-domain-verification=abc.eventhubtest.com>',
       }),
     ).toThrow(/RESEND_FROM_EMAIL must be a sender email address.*not a DNS verification record/);
   });

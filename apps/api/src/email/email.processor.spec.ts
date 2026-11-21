@@ -1,4 +1,5 @@
 import { jest } from '@jest/globals';
+import { Logger } from '@nestjs/common';
 
 const sendEmail = jest.fn();
 jest.unstable_mockModule('resend', () => ({
@@ -7,12 +8,24 @@ jest.unstable_mockModule('resend', () => ({
   },
 }));
 
-const { EmailProcessor, isPermanentSenderError, describeDeliveryError } =
-  await import('./email.processor.js');
+const {
+  EmailProcessor,
+  describeDeliveryError,
+  isPermanentSenderError,
+  maskEmail,
+} = await import('./email.processor.js');
 
 describe('EmailProcessor', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('masks the recipient local part in diagnostic logs', () => {
+    expect(maskEmail('ada.lovelace@gmail.com')).toBe('a***@gmail.com');
   });
 
   it('identifies permanent sender restrictions as non-retryable', () => {
@@ -67,6 +80,7 @@ describe('EmailProcessor', () => {
   });
 
   it('sends a registration confirmation with its inline QR attachment', async () => {
+    const logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
     sendEmail.mockResolvedValue({
       data: { id: 'provider-email-id' },
       error: null,
@@ -136,6 +150,77 @@ describe('EmailProcessor', () => {
       expect.objectContaining({
         where: { id: 'confirmation-id' },
         data: expect.objectContaining({ status: 'SENT' }),
+      }),
+    );
+    expect(logSpy.mock.calls.map(([message]) => JSON.parse(String(message)))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: 'email.send.attempt',
+          recipient: 'a***@example.test',
+        }),
+        expect.objectContaining({
+          event: 'email.send.accepted',
+          resendResponseId: 'provider-email-id',
+        }),
+      ]),
+    );
+  });
+
+  it('logs provider error messages and HTTP status without exposing the recipient', async () => {
+    const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    sendEmail.mockResolvedValue({
+      data: null,
+      error: {
+        message: 'Recipient ada@example.test is not allowed',
+        statusCode: 403,
+      },
+    });
+    const prisma = {
+      emailLog: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'confirmation-id',
+          type: 'REGISTRATION_CONFIRMATION',
+          status: 'PENDING',
+          scheduledAt: new Date(Date.now() - 1_000),
+          payloadCiphertext: 'encrypted-payload',
+        }),
+        update: jest.fn().mockResolvedValue(undefined),
+      },
+    };
+    const processor = new EmailProcessor(
+      prisma as never,
+      {
+        get: jest.fn((key: string) =>
+          key === 'RESEND_API_KEY' ? 'resend-key' : 'tickets@example.test',
+        ),
+      } as never,
+      {
+        decrypt: jest.fn().mockReturnValue({
+          to: 'ada@example.test',
+          qrCodeBase64: 'cXItY29kZS1ieXRlcw==',
+        }),
+      } as never,
+      {
+        render: jest.fn().mockResolvedValue({ subject: 'Ticket', html: '<p>Ticket</p>' }),
+      } as never,
+    );
+
+    await expect(
+      processor.process({
+        data: { emailLogId: 'confirmation-id' },
+        attemptsMade: 0,
+        opts: { attempts: 5 },
+      } as never),
+    ).rejects.toThrow('Resend delivery failed');
+
+    const diagnostic = JSON.parse(String(errorSpy.mock.calls[0]?.[0]));
+    expect(diagnostic).toEqual(
+      expect.objectContaining({
+        event: 'email.send.failed',
+        recipient: 'a***@example.test',
+        httpStatus: 403,
+        errorMessage:
+          'Resend delivery failed: Recipient a***@example.test is not allowed',
       }),
     );
   });

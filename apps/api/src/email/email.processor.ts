@@ -44,6 +44,8 @@ export class EmailProcessor extends WorkerHost {
       throw new Error(`Email log ${log.id} has no encrypted delivery payload`);
     }
 
+    let recipient = 'unknown';
+    let providerHttpStatus: number | null = null;
     try {
       const apiKey = this.config.get<string>('RESEND_API_KEY');
       const sender = this.config.get<string>('RESEND_FROM_EMAIL');
@@ -53,6 +55,7 @@ export class EmailProcessor extends WorkerHost {
         );
       }
       const payload = this.cipher.decrypt(log.payloadCiphertext);
+      recipient = payload.to;
       if (log.type === 'REGISTRATION_CONFIRMATION' && !payload.qrCodeBase64) {
         throw new Error(
           'Registration confirmation is missing its ticket QR code',
@@ -60,6 +63,14 @@ export class EmailProcessor extends WorkerHost {
       }
       const content = await this.templates.render(log.type, payload);
       const resend = new Resend(apiKey);
+      this.logger.log(
+        JSON.stringify({
+          event: 'email.send.attempt',
+          emailLogId: log.id,
+          emailType: log.type,
+          recipient: maskEmail(recipient),
+        }),
+      );
       const { data, error } = await resend.emails.send({
         from: sender,
         to: payload.to,
@@ -80,6 +91,7 @@ export class EmailProcessor extends WorkerHost {
           : {}),
       });
       if (error) {
+        providerHttpStatus = error.statusCode;
         throw new Error(`Resend delivery failed: ${error.message}`);
       }
 
@@ -94,12 +106,23 @@ export class EmailProcessor extends WorkerHost {
           errorMessage: null,
         },
       });
+      this.logger.log(
+        JSON.stringify({
+          event: 'email.send.accepted',
+          emailLogId: log.id,
+          emailType: log.type,
+          recipient: maskEmail(recipient),
+          resendResponseId: data?.id ?? null,
+        }),
+      );
     } catch (error) {
       const attempts = job.attemptsMade + 1;
       const providerErrorMessage =
         error instanceof Error ? error.message : 'Unknown email error';
       const permanentSenderError = isPermanentSenderError(providerErrorMessage);
-      const errorMessage = describeDeliveryError(providerErrorMessage);
+      const errorMessage = describeDeliveryError(
+        redactEmailAddresses(providerErrorMessage),
+      );
       const isFinalAttempt =
         permanentSenderError || attempts >= (job.opts.attempts ?? 1);
       await this.prisma.emailLog.update({
@@ -116,8 +139,15 @@ export class EmailProcessor extends WorkerHost {
         },
       });
       this.logger.error(
-        `Email delivery attempt ${attempts} failed for log ${log.id}`,
-        error instanceof Error ? error.stack : undefined,
+        JSON.stringify({
+          event: 'email.send.failed',
+          emailLogId: log.id,
+          emailType: log.type,
+          attempt: attempts,
+          recipient: maskEmail(recipient),
+          httpStatus: providerHttpStatus ?? errorStatusCode(error),
+          errorMessage: redactEmailAddresses(providerErrorMessage),
+        }),
       );
       if (permanentSenderError) {
         throw new UnrecoverableError(errorMessage);
@@ -125,6 +155,31 @@ export class EmailProcessor extends WorkerHost {
       throw error;
     }
   }
+}
+
+export function maskEmail(address: string): string {
+  const separator = address.lastIndexOf('@');
+  if (separator <= 0 || separator === address.length - 1) return '[invalid email]';
+  return `${address[0]}***${address.slice(separator)}`;
+}
+
+function redactEmailAddresses(message: string): string {
+  return message.replace(
+    /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
+    (address) => maskEmail(address),
+  );
+}
+
+function errorStatusCode(error: unknown): number | null {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'statusCode' in error &&
+    typeof error.statusCode === 'number'
+  ) {
+    return error.statusCode;
+  }
+  return null;
 }
 
 export function isPermanentSenderError(message: string): boolean {

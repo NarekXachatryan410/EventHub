@@ -3,7 +3,7 @@ export function validateEnvironment(
 ): Record<string, unknown> {
   if (environment.NODE_ENV !== 'production') {
     const sender = emailAddress(value(environment.RESEND_FROM_EMAIL));
-    if (sender && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(sender)) {
+    if (sender && !isValidEmailAddress(sender)) {
       throw new Error(
         'Invalid environment configuration: RESEND_FROM_EMAIL must be a sender email address (for example, EventHub <tickets@your-verified-domain.com>), not a DNS verification record',
       );
@@ -45,7 +45,7 @@ export function validateEnvironment(
     issues.push('Resend API key and verified sender must be configured');
   } else {
     const sender = emailAddress(value(environment.RESEND_FROM_EMAIL));
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(sender)) {
+    if (!isValidEmailAddress(sender)) {
       issues.push('RESEND_FROM_EMAIL must be a valid email address');
     } else if (isResendTestDomain(sender)) {
       issues.push(
@@ -78,6 +78,27 @@ function value(input: unknown): string {
 
 function emailAddress(sender: string): string {
   return (sender.match(/<([^<>]+)>/)?.[1] ?? sender).trim();
+}
+
+function isValidEmailAddress(address: string): boolean {
+  const [localPart, domain, ...extraParts] = address.split('@');
+  if (
+    !localPart ||
+    !domain ||
+    extraParts.length > 0 ||
+    localPart.length > 64 ||
+    address.length > 254
+  ) {
+    return false;
+  }
+  const labels = domain.split('.');
+  return (
+    labels.length >= 2 &&
+    labels.every((label) =>
+      /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label),
+    ) &&
+    /^[a-z]{2,63}$/i.test(labels.at(-1) ?? '')
+  );
 }
 
 function isResendTestDomain(sender: string): boolean {
