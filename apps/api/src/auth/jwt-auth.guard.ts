@@ -1,9 +1,11 @@
 import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { AuthenticatedRequest, AuthUser } from './auth.types.js';
@@ -13,6 +15,7 @@ export class JwtAuthGuard implements CanActivate {
   constructor(
     private readonly jwtService: JwtService,
     private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -20,6 +23,23 @@ export class JwtAuthGuard implements CanActivate {
     const token = request.cookies?.eventhub_auth;
     if (!token) {
       throw new UnauthorizedException('Staff login is required');
+    }
+
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method.toUpperCase())) {
+      const origin = request.get('origin');
+      if (origin) {
+        let configuredOrigin: string;
+        try {
+          configuredOrigin = new URL(
+            this.config.getOrThrow<string>('WEB_ORIGIN'),
+          ).origin;
+        } catch {
+          throw new ForbiddenException('Request origin is not allowed');
+        }
+        if (origin === 'null' || origin !== configuredOrigin) {
+          throw new ForbiddenException('Request origin is not allowed');
+        }
+      }
     }
 
     let payload: AuthUser;

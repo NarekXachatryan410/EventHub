@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
+import type { AuthUser } from '../auth/auth.types.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 type EventPerformanceRow = {
@@ -23,7 +24,15 @@ type MonthlyRegistrationRow = {
 export class AnalyticsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async dashboard(months = 12) {
+  async dashboard(months = 12, user: AuthUser) {
+    const organizerId =
+      user.role === UserRole.SUPER_ADMIN ? undefined : user.sub;
+    const eventScope: Prisma.EventWhereInput = organizerId
+      ? { organizerId }
+      : {};
+    const registrationScope: Prisma.EventRegistrationWhereInput = organizerId
+      ? { event: { organizerId } }
+      : {};
     const now = new Date();
     const currentMonth = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
@@ -44,15 +53,20 @@ export class AnalyticsService {
       monthlyRows,
       eventRows,
     ] = await Promise.all([
-      this.prisma.event.count(),
-      this.prisma.event.count({ where: { status: 'PUBLISHED' } }),
-      this.prisma.eventRegistration.count(),
-      this.prisma.eventRegistration.count({ where: { status: 'CONFIRMED' } }),
-      this.prisma.checkIn.count(),
+      this.prisma.event.count({ where: eventScope }),
+      this.prisma.event.count({ where: { ...eventScope, status: 'PUBLISHED' } }),
+      this.prisma.eventRegistration.count({ where: registrationScope }),
+      this.prisma.eventRegistration.count({ where: { ...registrationScope, status: 'CONFIRMED' } }),
+      this.prisma.checkIn.count({
+        where: organizerId
+          ? { ticket: { registration: { event: { organizerId } } } }
+          : {},
+      }),
       this.prisma.eventRegistration.count({
         where: {
           status: 'CONFIRMED',
           event: {
+            ...(organizerId ? { organizerId } : {}),
             endDate: { lt: now },
             status: { notIn: ['CANCELLED', 'ARCHIVED'] },
           },
@@ -64,6 +78,7 @@ export class AnalyticsService {
             registration: {
               status: 'CONFIRMED',
               event: {
+                ...(organizerId ? { organizerId } : {}),
                 endDate: { lt: now },
                 status: { notIn: ['CANCELLED', 'ARCHIVED'] },
               },
@@ -72,6 +87,7 @@ export class AnalyticsService {
         },
       }),
       this.prisma.feedback.aggregate({
+        where: organizerId ? { event: { organizerId } } : {},
         _count: { _all: true },
         _avg: {
           overallRating: true,
@@ -82,8 +98,10 @@ export class AnalyticsService {
       this.prisma.$queryRaw<MonthlyRegistrationRow[]>(Prisma.sql`
         SELECT to_char(date_trunc('month', "registeredAt"), 'YYYY-MM') AS "month",
                COUNT(*)::bigint AS "registrations"
-        FROM "EventRegistration"
-        WHERE "registeredAt" >= ${firstMonth}
+        FROM "EventRegistration" registration
+        JOIN "Event" event ON event."id" = registration."eventId"
+        WHERE registration."registeredAt" >= ${firstMonth}
+        ${organizerId ? Prisma.sql`AND event."organizerId" = ${organizerId}::uuid` : Prisma.empty}
         GROUP BY 1
         ORDER BY 1
       `),
@@ -107,6 +125,7 @@ export class AnalyticsService {
           (SELECT AVG(response."overallRating") FROM "Feedback" response
             WHERE response."eventId" = event."id") AS "averageRating"
         FROM "Event" event
+        ${organizerId ? Prisma.sql`WHERE event."organizerId" = ${organizerId}::uuid` : Prisma.empty}
         ORDER BY event."startDate" DESC
         LIMIT 20
       `),

@@ -1,9 +1,10 @@
 import { jest } from '@jest/globals';
 import {
   ConflictException,
+  NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { EmailStatus, EmailType } from '@prisma/client';
+import { EmailStatus, EmailType, UserRole } from '@prisma/client';
 import { EmailQueueService } from './email-queue.service.js';
 
 describe('EmailQueueService event reminders', () => {
@@ -73,7 +74,10 @@ describe('EmailQueueService event reminders', () => {
     };
     prisma = {
       emailLog: {
-        findUnique: jest.fn().mockResolvedValue({ status: EmailStatus.FAILED }),
+        findUnique: jest.fn().mockResolvedValue({
+          status: EmailStatus.FAILED,
+          registration: { event: { organizerId: 'organizer-id' } },
+        }),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
     };
@@ -180,7 +184,9 @@ describe('EmailQueueService event reminders', () => {
   });
 
   it('resets and queues a failed email after checking provider configuration', async () => {
-    await expect(service.retryFailedLog('email-log-id')).resolves.toEqual({
+    await expect(service.retryFailedLog('email-log-id', {
+      sub: 'admin-id', role: UserRole.SUPER_ADMIN,
+    })).resolves.toEqual({
       success: true,
     });
 
@@ -204,7 +210,9 @@ describe('EmailQueueService event reminders', () => {
     config.get.mockReturnValue('');
 
     await expect(
-      service.retryFailedLog('email-log-id'),
+      service.retryFailedLog('email-log-id', {
+        sub: 'admin-id', role: UserRole.SUPER_ADMIN,
+      }),
     ).rejects.toBeInstanceOf(ServiceUnavailableException);
     expect(prisma.emailLog.updateMany).not.toHaveBeenCalled();
   });
@@ -213,8 +221,21 @@ describe('EmailQueueService event reminders', () => {
     prisma.emailLog.findUnique.mockResolvedValue({ status: EmailStatus.SENT });
 
     await expect(
-      service.retryFailedLog('email-log-id'),
+      service.retryFailedLog('email-log-id', {
+        sub: 'admin-id', role: UserRole.SUPER_ADMIN,
+      }),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(prisma.emailLog.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('prevents an Event Manager from retrying another organizer email', async () => {
+    await expect(
+      service.retryFailedLog('email-log-id', {
+        sub: 'another-organizer',
+        role: UserRole.EVENT_MANAGER,
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(prisma.emailLog.updateMany).not.toHaveBeenCalled();
+    expect(queue.add).not.toHaveBeenCalled();
   });
 });

@@ -39,17 +39,65 @@ describe('EventAccessService', () => {
     ).resolves.toBeUndefined();
   });
 
-  it.each([UserRole.SUPER_ADMIN, UserRole.EVENT_MANAGER])(
-    'allows %s to manage events',
-    async (role) => {
-      findUnique.mockResolvedValue({
-        organizerId: 'another-staff-member',
-        staffAssignments: [],
-      });
+  it('allows Super Admins to manage any event', async () => {
+    findUnique.mockResolvedValue({
+      organizerId: 'another-staff-member',
+      staffAssignments: [],
+    });
 
-      await expect(
-        service.requireManageAccess(eventId, { sub: staffId, role }),
-      ).resolves.toBeUndefined();
-    },
-  );
+    await expect(
+      service.requireManageAccess(eventId, {
+        sub: staffId,
+        role: UserRole.SUPER_ADMIN,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('limits Event Managers to events they organize when editing', async () => {
+    findUnique.mockResolvedValue({ organizerId: 'another-organizer' });
+    await expect(
+      service.requireEditAccess(eventId, {
+        sub: staffId,
+        role: UserRole.EVENT_MANAGER,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    findUnique.mockResolvedValue({ organizerId: staffId });
+    await expect(
+      service.requireEditAccess(eventId, {
+        sub: staffId,
+        role: UserRole.EVENT_MANAGER,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('limits Event Managers to events they organize', async () => {
+    findUnique.mockResolvedValue({ organizerId: staffId, staffAssignments: [] });
+    await expect(
+      service.requireManageAccess(eventId, {
+        sub: staffId,
+        role: UserRole.EVENT_MANAGER,
+      }),
+    ).resolves.toBeUndefined();
+
+    findUnique.mockResolvedValue({
+      organizerId: 'another-organizer',
+      staffAssignments: [],
+    });
+    await expect(
+      service.requireManageAccess(eventId, {
+        sub: staffId,
+        role: UserRole.EVENT_MANAGER,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('lists only events belonging to an Event Manager', async () => {
+    await expect(
+      service.listWhere({ sub: staffId, role: UserRole.EVENT_MANAGER }),
+    ).resolves.toEqual({ organizerId: staffId });
+    await expect(
+      service.listWhere({ sub: staffId, role: UserRole.SUPER_ADMIN }),
+    ).resolves.toEqual({});
+  });
 });

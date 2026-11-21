@@ -1,4 +1,5 @@
 import { jest } from '@jest/globals';
+import { UserRole } from '@prisma/client';
 import { AnalyticsService } from './analytics.service.js';
 
 describe('AnalyticsService', () => {
@@ -26,7 +27,10 @@ describe('AnalyticsService', () => {
     };
     const service = new AnalyticsService(prisma as never);
 
-    const result = await service.dashboard(3);
+    const result = await service.dashboard(3, {
+      sub: 'admin-id',
+      role: UserRole.SUPER_ADMIN,
+    });
 
     expect(result.overview).toMatchObject({
       totalEvents: 4,
@@ -58,9 +62,43 @@ describe('AnalyticsService', () => {
     };
     const service = new AnalyticsService(prisma as never);
 
-    const result = await service.dashboard(3);
+    const result = await service.dashboard(3, {
+      sub: 'admin-id',
+      role: UserRole.SUPER_ADMIN,
+    });
 
     expect(result.overview.attendanceRate).toBe(0);
     expect(result.overview.noShowRate).toBe(0);
+  });
+
+  it('scopes Event Manager analytics queries to the organizer', async () => {
+    const prisma = {
+      event: { count: jest.fn().mockResolvedValue(0) },
+      eventRegistration: { count: jest.fn().mockResolvedValue(0) },
+      checkIn: { count: jest.fn().mockResolvedValue(0) },
+      feedback: {
+        aggregate: jest.fn().mockResolvedValue({
+          _count: { _all: 0 },
+          _avg: { overallRating: null, contentRating: null, organizationRating: null },
+        }),
+      },
+      $queryRaw: jest.fn().mockResolvedValue([]),
+    };
+    await new AnalyticsService(prisma as never).dashboard(2, {
+      sub: 'organizer-id',
+      role: UserRole.EVENT_MANAGER,
+    });
+
+    expect(prisma.event.count).toHaveBeenCalledWith({
+      where: { organizerId: 'organizer-id' },
+    });
+    expect(prisma.eventRegistration.count).toHaveBeenCalledWith({
+      where: { event: { organizerId: 'organizer-id' } },
+    });
+    expect(prisma.feedback.aggregate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { event: { organizerId: 'organizer-id' } },
+      }),
+    );
   });
 });

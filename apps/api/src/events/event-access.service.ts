@@ -11,6 +11,7 @@ export class EventAccessService {
     const event = await this.prisma.event.findUnique({
       where: { id: eventId },
       select: {
+        organizerId: true,
         staffAssignments: {
           where: { staffId: user.sub },
           select: { id: true },
@@ -21,7 +22,13 @@ export class EventAccessService {
       throw new NotFoundException('Event not found');
     }
 
-    if (user.role === UserRole.SUPER_ADMIN || user.role === UserRole.EVENT_MANAGER) {
+    if (user.role === UserRole.SUPER_ADMIN) {
+      return;
+    }
+    if (
+      user.role === UserRole.EVENT_MANAGER &&
+      event.organizerId === user.sub
+    ) {
       return;
     }
     if (
@@ -41,9 +48,10 @@ export class EventAccessService {
     if (!event) {
       throw new NotFoundException('Event not found');
     }
+    if (user.role === UserRole.SUPER_ADMIN) return;
     if (
-      user.role !== UserRole.SUPER_ADMIN &&
-      user.role !== UserRole.EVENT_MANAGER
+      user.role !== UserRole.EVENT_MANAGER ||
+      event.organizerId !== user.sub
     ) {
       throw new ForbiddenException('Only event managers or super admins can edit this event');
     }
@@ -61,7 +69,7 @@ export class EventAccessService {
       };
     }
     if (user.role === UserRole.EVENT_MANAGER) {
-      return {};
+      return { organizerId: user.sub };
     }
     return { organizerId: user.sub };
   }

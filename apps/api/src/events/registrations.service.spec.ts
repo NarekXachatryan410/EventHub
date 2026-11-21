@@ -108,6 +108,7 @@ describe('RegistrationsService', () => {
       transaction.eventRegistration.create.mock.calls[0]?.[0].data;
 
     expect(result.status).toBe(RegistrationStatus.CONFIRMED);
+    expect(transaction.$queryRaw).toHaveBeenCalledTimes(1);
     expect(result.ticket?.token).toBeTruthy();
     expect(registrationData.email).toBe('ada@example.com');
     expect(transaction.eventRegistration.update).toHaveBeenCalledWith({

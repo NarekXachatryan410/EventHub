@@ -15,6 +15,7 @@ export function validateEnvironment(
   const jwtSecret = value(environment.JWT_SECRET);
   const encryptionKey = value(environment.EMAIL_ENCRYPTION_KEY);
   const databaseUrl = value(environment.DATABASE_URL);
+  const directUrl = value(environment.DIRECT_URL);
   const redisUrl = value(environment.REDIS_URL);
   const webOrigin = value(environment.WEB_ORIGIN);
 
@@ -34,10 +35,18 @@ export function validateEnvironment(
       'EMAIL_ENCRYPTION_KEY must be a separate deployment-specific secret of at least 32 characters',
     );
   }
-  if (!/^postgres(ql)?:\/\//i.test(databaseUrl)) {
+  if (jwtSecret && jwtSecret === encryptionKey) {
+    issues.push('JWT_SECRET and EMAIL_ENCRYPTION_KEY must be different secrets');
+  }
+  if (!isPostgresUrl(databaseUrl)) {
     issues.push('DATABASE_URL must point to PostgreSQL');
   }
-  if (!redisUrl) issues.push('REDIS_URL must be configured');
+  if (!isPostgresUrl(directUrl)) {
+    issues.push('DIRECT_URL must point to the direct PostgreSQL connection used for migrations');
+  }
+  if (!isRedisUrl(redisUrl)) {
+    issues.push('REDIS_URL must be a valid redis:// or rediss:// URL');
+  }
   if (
     !value(environment.RESEND_API_KEY) ||
     !value(environment.RESEND_FROM_EMAIL)
@@ -59,8 +68,18 @@ export function validateEnvironment(
     );
   }
   try {
-    if (new URL(webOrigin).protocol !== 'https:') {
+    const parsedOrigin = new URL(webOrigin);
+    if (parsedOrigin.protocol !== 'https:') {
       issues.push('WEB_ORIGIN must use HTTPS in production');
+    }
+    if (
+      parsedOrigin.username ||
+      parsedOrigin.password ||
+      parsedOrigin.pathname !== '/' ||
+      parsedOrigin.search ||
+      parsedOrigin.hash
+    ) {
+      issues.push('WEB_ORIGIN must contain only the frontend origin, without a path or credentials');
     }
   } catch {
     issues.push('WEB_ORIGIN must be a valid HTTPS URL');
@@ -74,6 +93,30 @@ export function validateEnvironment(
 
 function value(input: unknown): string {
   return typeof input === 'string' ? input.trim() : '';
+}
+
+function isPostgresUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === 'postgres:' || url.protocol === 'postgresql:') &&
+      url.hostname.length > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isRedisUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === 'redis:' || url.protocol === 'rediss:') &&
+      url.hostname.length > 0
+    );
+  } catch {
+    return false;
+  }
 }
 
 function emailAddress(sender: string): string {

@@ -13,6 +13,7 @@ import {
   EmailType,
   Prisma,
   RegistrationStatus,
+  UserRole,
   type Event,
 } from '@prisma/client';
 import type { Queue } from 'bullmq';
@@ -20,6 +21,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import type { EmailPayload } from './email.types.js';
 import { EMAIL_QUEUE } from './email.types.js';
 import { EmailPayloadCipher } from './email-payload-cipher.service.js';
+import type { AuthUser } from '../auth/auth.types.js';
 
 @Injectable()
 export class EmailQueueService {
@@ -227,7 +229,7 @@ export class EmailQueueService {
     );
   }
 
-  async retryFailedLog(id: string): Promise<{ success: true }> {
+  async retryFailedLog(id: string, user: AuthUser): Promise<{ success: true }> {
     if (
       !this.config.get<string>('RESEND_API_KEY') ||
       !this.config.get<string>('RESEND_FROM_EMAIL')
@@ -238,9 +240,18 @@ export class EmailQueueService {
     }
     const log = await this.prisma.emailLog.findUnique({
       where: { id },
-      select: { status: true },
+      select: {
+        status: true,
+        registration: { select: { event: { select: { organizerId: true } } } },
+      },
     });
     if (!log) throw new NotFoundException('Email log not found');
+    if (
+      user.role !== UserRole.SUPER_ADMIN &&
+      (!log.registration || log.registration.event.organizerId !== user.sub)
+    ) {
+      throw new NotFoundException('Email log not found');
+    }
     if (log.status !== EmailStatus.FAILED) {
       throw new ConflictException('Only failed email logs can be retried');
     }

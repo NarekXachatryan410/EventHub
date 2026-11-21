@@ -9,6 +9,7 @@ services:
       PORT: 4000
       TRUST_PROXY: ${TRUST_PROXY:-1}
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to the production PostgreSQL connection}
+      DIRECT_URL: ${DIRECT_URL:?Set DIRECT_URL to the direct production PostgreSQL connection for migrations}
       REDIS_URL: ${REDIS_URL:?Set REDIS_URL to the production Redis connection}
       JWT_SECRET: ${JWT_SECRET:?Set a unique JWT_SECRET of at least 32 characters}
       EMAIL_ENCRYPTION_KEY: ${EMAIL_ENCRYPTION_KEY:?Set a separate encryption secret of at least 32 characters}
