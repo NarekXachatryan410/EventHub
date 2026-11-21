@@ -4,14 +4,16 @@ import helmet from 'helmet';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module.js';
+import { parsePort, parseTrustProxy } from './config/runtime-config.js';
 import { HttpExceptionFilter } from './http-exception.filter.js';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { rawBody: true });
   app.setGlobalPrefix('api');
   app.use(helmet({ contentSecurityPolicy: false }));
-  if (process.env.TRUST_PROXY) {
-    app.getHttpAdapter().getInstance().set('trust proxy', process.env.TRUST_PROXY);
+  const trustProxy = parseTrustProxy(process.env.TRUST_PROXY);
+  if (trustProxy !== undefined) {
+    app.getHttpAdapter().getInstance().set('trust proxy', trustProxy);
   }
   app.use(cookieParser());
   app.enableCors({
@@ -35,6 +37,6 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('docs', app, document, { useGlobalPrefix: true });
 
-  await app.listen(process.env.PORT ?? 4000);
+  await app.listen(parsePort(process.env.PORT), '0.0.0.0');
 }
 await bootstrap();

@@ -11,6 +11,7 @@ import { EmailTemplatesController } from './email-templates.controller.js';
 import { EmailPayloadCipher } from './email-payload-cipher.service.js';
 import { EmailTemplatesService } from './email-templates.service.js';
 import { EMAIL_QUEUE } from './email.types.js';
+import { createBullRedisConnectionOptions } from './redis-connection.js';
 
 @Module({
   imports: [
@@ -20,17 +21,10 @@ import { EMAIL_QUEUE } from './email.types.js';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
-        const redisUrl = new URL(
-          config.get<string>('REDIS_URL') ?? 'redis://localhost:6379',
-        );
         return {
-          connection: {
-            host: redisUrl.hostname,
-            port: Number(redisUrl.port || 6379),
-            ...(redisUrl.password
-              ? { password: decodeURIComponent(redisUrl.password) }
-              : {}),
-          },
+          connection: createBullRedisConnectionOptions(
+            config.get<string>('REDIS_URL'),
+          ),
         };
       },
     }),
