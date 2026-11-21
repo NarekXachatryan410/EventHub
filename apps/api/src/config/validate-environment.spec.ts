@@ -55,4 +55,13 @@ describe('validateEnvironment', () => {
     const development = { NODE_ENV: 'development' };
     expect(validateEnvironment(development)).toBe(development);
   });
+
+  it('rejects a DNS verification record used as the development sender', () => {
+    expect(() =>
+      validateEnvironment({
+        NODE_ENV: 'development',
+        RESEND_FROM_EMAIL: 'resend-domain-verification=abc.example.com',
+      }),
+    ).toThrow(/RESEND_FROM_EMAIL must be a sender email address.*not a DNS verification record/);
+  });
 });

@@ -1,7 +1,15 @@
 export function validateEnvironment(
   environment: Record<string, unknown>,
 ): Record<string, unknown> {
-  if (environment.NODE_ENV !== 'production') return environment;
+  if (environment.NODE_ENV !== 'production') {
+    const sender = emailAddress(value(environment.RESEND_FROM_EMAIL));
+    if (sender && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(sender)) {
+      throw new Error(
+        'Invalid environment configuration: RESEND_FROM_EMAIL must be a sender email address (for example, EventHub <tickets@your-verified-domain.com>), not a DNS verification record',
+      );
+    }
+    return environment;
+  }
 
   const issues: string[] = [];
   const jwtSecret = value(environment.JWT_SECRET);
