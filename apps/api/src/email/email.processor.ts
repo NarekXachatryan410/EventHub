@@ -96,9 +96,10 @@ export class EmailProcessor extends WorkerHost {
       });
     } catch (error) {
       const attempts = job.attemptsMade + 1;
-      const errorMessage =
+      const providerErrorMessage =
         error instanceof Error ? error.message : 'Unknown email error';
-      const permanentSenderError = isPermanentSenderError(errorMessage);
+      const permanentSenderError = isPermanentSenderError(providerErrorMessage);
+      const errorMessage = describeDeliveryError(providerErrorMessage);
       const isFinalAttempt =
         permanentSenderError || attempts >= (job.opts.attempts ?? 1);
       await this.prisma.emailLog.update({
@@ -130,4 +131,14 @@ export function isPermanentSenderError(message: string): boolean {
   return /domain is not verified|sender address is not verified|only send testing emails to your own email address|verify a domain at resend\.com\/domains/i.test(
     message,
   );
+}
+
+export function describeDeliveryError(message: string): string {
+  if (/only send testing emails to your own email address/i.test(message)) {
+    return 'Resend rejected this recipient because the configured sender is in testing mode. Verify a sending domain in Resend, set RESEND_FROM_EMAIL to an address on that verified domain, redeploy, then retry this email.';
+  }
+  if (/domain is not verified|sender address is not verified|verify a domain at resend\.com\/domains/i.test(message)) {
+    return 'Resend rejected the configured sender. Verify its domain in Resend, set RESEND_FROM_EMAIL to an address on that verified domain, redeploy, then retry this email.';
+  }
+  return message;
 }

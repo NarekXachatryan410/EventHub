@@ -35,6 +35,15 @@ export function validateEnvironment(
     !value(environment.RESEND_FROM_EMAIL)
   ) {
     issues.push('Resend API key and verified sender must be configured');
+  } else {
+    const sender = emailAddress(value(environment.RESEND_FROM_EMAIL));
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(sender)) {
+      issues.push('RESEND_FROM_EMAIL must be a valid email address');
+    } else if (isResendTestDomain(sender)) {
+      issues.push(
+        'RESEND_FROM_EMAIL must use a domain verified in Resend; the resend.dev testing sender cannot send attendee emails',
+      );
+    }
   }
   if (!value(environment.RESEND_WEBHOOK_SECRET)) {
     issues.push(
@@ -57,4 +66,13 @@ export function validateEnvironment(
 
 function value(input: unknown): string {
   return typeof input === 'string' ? input.trim() : '';
+}
+
+function emailAddress(sender: string): string {
+  return (sender.match(/<([^<>]+)>/)?.[1] ?? sender).trim();
+}
+
+function isResendTestDomain(sender: string): boolean {
+  const domain = sender.split('@').at(-1)?.toLowerCase() ?? '';
+  return domain === 'resend.dev' || domain.endsWith('.resend.dev');
 }

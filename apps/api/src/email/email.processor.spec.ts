@@ -7,7 +7,7 @@ jest.unstable_mockModule('resend', () => ({
   },
 }));
 
-const { EmailProcessor, isPermanentSenderError } =
+const { EmailProcessor, isPermanentSenderError, describeDeliveryError } =
   await import('./email.processor.js');
 
 describe('EmailProcessor', () => {
@@ -27,6 +27,14 @@ describe('EmailProcessor', () => {
     expect(isPermanentSenderError('Resend delivery failed: rate limited')).toBe(
       false,
     );
+  });
+
+  it('gives an actionable fix for Resend testing-sender rejection', () => {
+    expect(
+      describeDeliveryError(
+        'Resend delivery failed: You can only send testing emails to your own email address.',
+      ),
+    ).toMatch(/verify a sending domain in Resend.*retry this email/i);
   });
 
   it('does not send a reminder job before its rescheduled time', async () => {

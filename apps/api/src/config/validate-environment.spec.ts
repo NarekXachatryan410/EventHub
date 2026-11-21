@@ -33,6 +33,24 @@ describe('validateEnvironment', () => {
     ).toThrow(/RESEND_WEBHOOK_SECRET/);
   });
 
+  it('rejects Resend testing senders in production', () => {
+    expect(() =>
+      validateEnvironment({
+        ...productionConfig,
+        RESEND_FROM_EMAIL: 'EventHub <onboarding@resend.dev>',
+      }),
+    ).toThrow(/RESEND_FROM_EMAIL.*domain verified in Resend/);
+  });
+
+  it('rejects malformed sender addresses in production', () => {
+    expect(() =>
+      validateEnvironment({
+        ...productionConfig,
+        RESEND_FROM_EMAIL: 'EventHub notifications',
+      }),
+    ).toThrow(/RESEND_FROM_EMAIL must be a valid email address/);
+  });
+
   it('does not impose production-only secret requirements in development', () => {
     const development = { NODE_ENV: 'development' };
     expect(validateEnvironment(development)).toBe(development);
