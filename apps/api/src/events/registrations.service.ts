@@ -19,6 +19,7 @@ import {
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import QRCode from 'qrcode';
 import type { AuthUser } from '../auth/auth.types.js';
+import { CrmService } from '../crm/crm.service.js';
 import { EmailQueueService } from '../email/email-queue.service.js';
 import type { EmailPayload } from '../email/email.types.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -37,6 +38,7 @@ const activeStatuses: RegistrationStatus[] = [
 type RegistrationEvent = Pick<
   Event,
   | 'id'
+  | 'organizerId'
   | 'slug'
   | 'title'
   | 'location'
@@ -59,6 +61,7 @@ export class RegistrationsService {
     private readonly access: EventAccessService,
     private readonly emailQueue: EmailQueueService,
     private readonly config: ConfigService,
+    private readonly crm: CrmService,
   ) {}
 
   async register(eventId: string, input: CreateRegistrationDto) {
@@ -451,6 +454,22 @@ export class RegistrationsService {
           include: {
             ticket: { select: { id: true } },
           },
+        });
+        const crmCustomer = await this.crm.upsertFromRegistration(transaction, {
+          organizerId: event.organizerId,
+          registrationId: registration.id,
+          eventId: event.id,
+          eventTitle: event.title,
+          firstName: registration.firstName,
+          lastName: registration.lastName,
+          email: registration.email,
+          phone: registration.phone,
+          marketingConsent: registration.marketingConsent,
+          registeredAt: registration.registeredAt,
+        });
+        await transaction.eventRegistration.update({
+          where: { id: registration.id },
+          data: { crmCustomerId: crmCustomer.id },
         });
 
         const emailType =

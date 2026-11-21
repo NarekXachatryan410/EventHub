@@ -16,6 +16,7 @@ describe('RegistrationsService', () => {
     eventRegistration: {
       count: jest.Mock;
       create: jest.Mock;
+      update: jest.Mock;
       findUnique: jest.Mock;
     };
   };
@@ -23,6 +24,7 @@ describe('RegistrationsService', () => {
     createOutboxEntry: jest.Mock;
     dispatchLog: jest.Mock;
   };
+  let crm: { upsertFromRegistration: jest.Mock };
 
   const input = {
     firstName: 'Ada',
@@ -34,6 +36,7 @@ describe('RegistrationsService', () => {
   function registrationEvent(registrationQuestions: unknown = null) {
     return {
       id: eventId,
+      organizerId: 'organizer-id',
       slug: 'academy-open-day',
       title: 'Academy Open Day',
       location: 'Main campus',
@@ -56,12 +59,16 @@ describe('RegistrationsService', () => {
         count: jest.fn().mockResolvedValue(0),
         create: jest.fn().mockImplementation(async ({ data }) => ({
           id: registrationId,
+          registeredAt: new Date('2030-01-01T00:00:00.000Z'),
           firstName: data.firstName,
           lastName: data.lastName,
           email: data.email,
           status: data.status,
+          marketingConsent: data.marketingConsent,
+          phone: data.phone,
           ticket: data.ticket ? { id: 'ticket-id' } : null,
         })),
+        update: jest.fn().mockResolvedValue({}),
         findUnique: jest.fn().mockResolvedValue(null),
       },
     };
@@ -70,6 +77,9 @@ describe('RegistrationsService', () => {
     emailQueue = {
       createOutboxEntry: jest.fn().mockResolvedValue({ id: 'email-log-id' }),
       dispatchLog: jest.fn().mockResolvedValue(undefined),
+    };
+    crm = {
+      upsertFromRegistration: jest.fn().mockResolvedValue({ id: 'crm-customer-id' }),
     };
     const prisma = {
       $transaction: jest.fn(
@@ -82,6 +92,7 @@ describe('RegistrationsService', () => {
       { requireManageAccess: jest.fn() } as never,
       emailQueue as never,
       { get: jest.fn().mockReturnValue('http://localhost:3000') } as never,
+      crm as never,
     );
   });
 
@@ -93,6 +104,18 @@ describe('RegistrationsService', () => {
     expect(result.status).toBe(RegistrationStatus.CONFIRMED);
     expect(result.ticket?.token).toBeTruthy();
     expect(registrationData.email).toBe('ada@example.com');
+    expect(transaction.eventRegistration.update).toHaveBeenCalledWith({
+      where: { id: registrationId },
+      data: { crmCustomerId: 'crm-customer-id' },
+    });
+    expect(crm.upsertFromRegistration).toHaveBeenCalledWith(
+      transaction,
+      expect.objectContaining({
+        organizerId: 'organizer-id',
+        registrationId,
+        email: 'ada@example.com',
+      }),
+    );
     expect(registrationData.ticket.create.tokenHash).toBe(
       createHash('sha256').update(result.ticket!.token).digest('hex'),
     );
@@ -217,6 +240,7 @@ describe('RegistrationsService', () => {
       { requireManageAccess: jest.fn().mockResolvedValue(undefined) } as never,
       emailQueue as never,
       { get: jest.fn() } as never,
+      crm as never,
     );
 
     const result = await listService.listPage(

@@ -9,6 +9,7 @@ import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { AnalyticsModule } from './analytics/analytics.module.js';
 import { AuditModule } from './audit/audit.module.js';
+import { CrmModule } from './crm/crm.module.js';
 import { validateEnvironment } from './config/validate-environment.js';
 import { EmailModule } from './email/email.module.js';
 import { EventsModule } from './events/events.module.js';
@@ -39,6 +40,7 @@ import { SecurityModule } from './security/security.module.js';
     }),
     PrismaModule,
     AuthModule,
+    CrmModule,
     EventsModule,
     EmailModule,
     PlanningModule,

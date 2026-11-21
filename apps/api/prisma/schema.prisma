@@ -77,6 +77,51 @@ enum PlanningTaskStatus {
   BLOCKED
 }
 
+enum CrmCustomerStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum CrmActivityType {
+  CUSTOMER_CREATED
+  CUSTOMER_UPDATED
+  REGISTRATION_CREATED
+  TICKET_CANCELLED
+  CHECKED_IN
+  ATTENDED
+  NOTE_ADDED
+  REMINDER_CREATED
+  REMINDER_COMPLETED
+  COMMUNICATION_RECORDED
+}
+
+enum CrmReminderStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+enum CrmCommunicationChannel {
+  EMAIL
+  PHONE_CALL
+  MEETING
+  OTHER
+}
+
+enum CrmCommunicationDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum CrmCommunicationStatus {
+  RECORDED
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+  BOUNCED
+}
+
 model User {
   id                       String                 @id @default(uuid()) @db.Uuid
   firstName                String
@@ -91,6 +136,15 @@ model User {
   assignedPlanningTasks    PlanningTask[]         @relation("PlanningTaskAssignee")
   createdPlanningTemplates PlanningTemplate[]     @relation("PlanningTemplateCreator")
   auditLogs                AuditLog[]
+  crmCustomers             CrmCustomer[]           @relation("CrmCustomerOrganizer")
+  crmCustomerNotes         CrmCustomerNote[]       @relation("CrmCustomerNoteAuthor")
+  crmCustomerActivities    CrmCustomerActivity[]   @relation("CrmCustomerActivityActor")
+  crmCustomerTags          CrmCustomerTag[]        @relation("CrmCustomerTagOrganizer")
+  crmSegments              CrmCustomerSegment[]    @relation("CrmCustomerSegmentOrganizer")
+  crmSegmentsCreated       CrmCustomerSegment[]    @relation("CrmCustomerSegmentCreator")
+  crmRemindersCreated      CrmCustomerReminder[]   @relation("CrmCustomerReminderCreator")
+  crmRemindersAssigned     CrmCustomerReminder[]   @relation("CrmCustomerReminderAssignee")
+  crmCommunications        CrmCommunicationRecord[] @relation("CrmCommunicationCreator")
   createdAt                DateTime               @default(now()) @db.Timestamptz(6)
   updatedAt                DateTime               @updatedAt @db.Timestamptz(6)
 
@@ -121,6 +175,7 @@ model Event {
   reminderOffsetsHours  Int[]                   @default([24, 2])
   registrations         EventRegistration[]
   feedback              Feedback[]
+  crmActivities         CrmCustomerActivity[]
   staffAssignments      EventStaffAssignment[]
   planningChecklist     EventPlanningChecklist?
   createdAt             DateTime                @default(now()) @db.Timestamptz(6)
@@ -148,10 +203,13 @@ model EventRegistration {
   ticket                Ticket?
   emailLogs             EmailLog[]
   feedback              Feedback?
+  crmCustomerId         String?            @db.Uuid
+  crmCustomer           CrmCustomer?       @relation(fields: [crmCustomerId], references: [id], onDelete: SetNull)
 
   @@unique([eventId, normalizedEmail])
   @@index([eventId, status])
   @@index([eventId, registeredAt])
+  @@index([crmCustomerId, registeredAt])
 }
 
 model Ticket {
@@ -308,4 +366,157 @@ model AuditLog {
 
   @@index([createdAt])
   @@index([actorId, createdAt])
+}
+
+model CrmCustomer {
+  id                     String                          @id @default(uuid()) @db.Uuid
+  organizerId            String                          @db.Uuid
+  organizer              User                            @relation("CrmCustomerOrganizer", fields: [organizerId], references: [id], onDelete: Restrict)
+  email                  String
+  normalizedEmail        String
+  firstName              String
+  lastName               String
+  phone                  String?
+  birthday               DateTime?                       @db.Date
+  profileImageUrl        String?
+  status                 CrmCustomerStatus               @default(ACTIVE)
+  marketingConsent       Boolean                         @default(false)
+  marketingConsentAt     DateTime?                       @db.Timestamptz(6)
+  marketingConsentSource String?
+  registrations          EventRegistration[]
+  tags                   CrmCustomerTagAssignment[]
+  notes                  CrmCustomerNote[]
+  activities             CrmCustomerActivity[]
+  segmentMemberships     CrmCustomerSegmentMembership[]
+  reminders              CrmCustomerReminder[]
+  communications         CrmCommunicationRecord[]
+  createdAt              DateTime                        @default(now()) @db.Timestamptz(6)
+  updatedAt              DateTime                        @updatedAt @db.Timestamptz(6)
+
+  @@unique([organizerId, normalizedEmail])
+  @@index([organizerId, status, createdAt])
+  @@index([organizerId, lastName, firstName])
+}
+
+model CrmCustomerNote {
+  id         String      @id @default(uuid()) @db.Uuid
+  customerId String      @db.Uuid
+  customer   CrmCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  authorId   String?     @db.Uuid
+  author     User?       @relation("CrmCustomerNoteAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  content    String
+  createdAt  DateTime    @default(now()) @db.Timestamptz(6)
+  updatedAt  DateTime    @updatedAt @db.Timestamptz(6)
+
+  @@index([customerId, createdAt])
+}
+
+model CrmCustomerActivity {
+  id         String         @id @default(uuid()) @db.Uuid
+  customerId String         @db.Uuid
+  customer   CrmCustomer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  actorId    String?        @db.Uuid
+  actor      User?          @relation("CrmCustomerActivityActor", fields: [actorId], references: [id], onDelete: SetNull)
+  eventId    String?        @db.Uuid
+  event      Event?         @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  type       CrmActivityType
+  summary    String
+  metadata   Json?          @db.JsonB
+  sourceKey  String?        @unique
+  occurredAt DateTime       @default(now()) @db.Timestamptz(6)
+
+  @@index([customerId, occurredAt])
+  @@index([eventId, occurredAt])
+}
+
+model CrmCustomerTag {
+  id          String                     @id @default(uuid()) @db.Uuid
+  organizerId String                     @db.Uuid
+  organizer   User                       @relation("CrmCustomerTagOrganizer", fields: [organizerId], references: [id], onDelete: Cascade)
+  name        String
+  color       String                     @default("indigo")
+  customers   CrmCustomerTagAssignment[]
+  createdAt   DateTime                   @default(now()) @db.Timestamptz(6)
+
+  @@unique([organizerId, name])
+  @@index([organizerId, name])
+}
+
+model CrmCustomerTagAssignment {
+  customerId String         @db.Uuid
+  customer   CrmCustomer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  tagId      String         @db.Uuid
+  tag        CrmCustomerTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  assignedAt DateTime       @default(now()) @db.Timestamptz(6)
+
+  @@id([customerId, tagId])
+  @@index([tagId, customerId])
+}
+
+model CrmCustomerSegment {
+  id          String                          @id @default(uuid()) @db.Uuid
+  organizerId String                          @db.Uuid
+  organizer   User                            @relation("CrmCustomerSegmentOrganizer", fields: [organizerId], references: [id], onDelete: Cascade)
+  createdById String?                         @db.Uuid
+  createdBy   User?                           @relation("CrmCustomerSegmentCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  name        String
+  description String?
+  criteria    Json                            @db.JsonB
+  isSystem    Boolean                         @default(false)
+  memberships CrmCustomerSegmentMembership[]
+  createdAt   DateTime                        @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime                        @updatedAt @db.Timestamptz(6)
+
+  @@unique([organizerId, name])
+  @@index([organizerId, isSystem, name])
+}
+
+model CrmCustomerSegmentMembership {
+  segmentId  String             @db.Uuid
+  segment    CrmCustomerSegment @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+  customerId String             @db.Uuid
+  customer   CrmCustomer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  matchedAt  DateTime           @default(now()) @db.Timestamptz(6)
+
+  @@id([segmentId, customerId])
+  @@index([customerId, segmentId])
+}
+
+model CrmCustomerReminder {
+  id           String            @id @default(uuid()) @db.Uuid
+  customerId   String            @db.Uuid
+  customer     CrmCustomer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdById  String            @db.Uuid
+  createdBy    User              @relation("CrmCustomerReminderCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  assignedToId String?           @db.Uuid
+  assignedTo   User?             @relation("CrmCustomerReminderAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  title        String
+  description  String?
+  dueAt        DateTime          @db.Timestamptz(6)
+  status       CrmReminderStatus @default(PENDING)
+  completedAt  DateTime?         @db.Timestamptz(6)
+  createdAt    DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime          @updatedAt @db.Timestamptz(6)
+
+  @@index([customerId, dueAt, status])
+  @@index([assignedToId, dueAt, status])
+}
+
+model CrmCommunicationRecord {
+  id          String                     @id @default(uuid()) @db.Uuid
+  customerId  String                     @db.Uuid
+  customer    CrmCustomer                @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdById String?                    @db.Uuid
+  createdBy   User?                      @relation("CrmCommunicationCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  channel     CrmCommunicationChannel
+  direction   CrmCommunicationDirection
+  status      CrmCommunicationStatus     @default(RECORDED)
+  subject     String?
+  summary     String
+  providerId  String?
+  occurredAt  DateTime                   @default(now()) @db.Timestamptz(6)
+  createdAt   DateTime                   @default(now()) @db.Timestamptz(6)
+
+  @@index([customerId, occurredAt])
+  @@index([status, occurredAt])
 }
