@@ -48,9 +48,16 @@ export class EmailProcessor extends WorkerHost {
       const apiKey = this.config.get<string>('RESEND_API_KEY');
       const sender = this.config.get<string>('RESEND_FROM_EMAIL');
       if (!apiKey || !sender) {
-        throw new Error('RESEND_API_KEY and RESEND_FROM_EMAIL must be configured');
+        throw new Error(
+          'RESEND_API_KEY and RESEND_FROM_EMAIL must be configured',
+        );
       }
       const payload = this.cipher.decrypt(log.payloadCiphertext);
+      if (log.type === 'REGISTRATION_CONFIRMATION' && !payload.qrCodeBase64) {
+        throw new Error(
+          'Registration confirmation is missing its ticket QR code',
+        );
+      }
       const content = await this.templates.render(log.type, payload);
       const resend = new Resend(apiKey);
       const { data, error } = await resend.emails.send({

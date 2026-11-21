@@ -1,13 +1,20 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { EmailType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { EmailPayload, EmailTemplateContent } from './email.types.js';
 
-const defaultTemplates: Record<EmailType, Omit<EmailTemplateContent, 'type'>> = {
+const defaultTemplates: Record<
+  EmailType,
+  Omit<EmailTemplateContent, 'type'>
+> = {
   REGISTRATION_CONFIRMATION: {
     subject: 'Your ticket for {{eventTitle}}',
-    html: '<p>Hello {{firstName}},</p><p>Your registration for <strong>{{eventTitle}}</strong> is confirmed.</p><p>{{eventDate}} · {{eventLocation}}</p><p><a href="{{ticketUrl}}">Open your ticket</a></p><img src="cid:eventhub-ticket" alt="Event ticket QR code" width="220">',
-    text: 'Hello {{firstName}}, your registration for {{eventTitle}} is confirmed. {{eventDate}} · {{eventLocation}}. Ticket: {{ticketUrl}}',
+    html: '<p>Hello {{firstName}},</p><h1>Your registration is confirmed</h1><p>You are registered for <strong>{{eventTitle}}</strong>.</p><p>{{eventDate}} · {{eventLocation}}</p><h2>Your ticket QR code</h2><p>Show this QR code at check-in.</p><p><img src="cid:eventhub-ticket" alt="QR code for your {{eventTitle}} ticket" width="220" height="220"></p><p><a href="{{ticketUrl}}">Open your ticket online</a></p>',
+    text: 'Hello {{firstName}}, your registration for {{eventTitle}} is confirmed. {{eventDate}} · {{eventLocation}}. Show the QR code in this email at check-in, or open your ticket online: {{ticketUrl}}',
   },
   WAITLIST_CONFIRMATION: {
     subject: 'You are on the waiting list for {{eventTitle}}',
@@ -51,6 +58,14 @@ export class EmailTemplatesService {
     type: EmailType,
     data: { subject: string; html: string; text?: string; isActive?: boolean },
   ) {
+    if (
+      type === EmailType.REGISTRATION_CONFIRMATION &&
+      data.isActive === false
+    ) {
+      throw new BadRequestException(
+        'The registration confirmation email must remain active',
+      );
+    }
     return this.prisma.emailTemplate.upsert({
       where: { type },
       create: {
@@ -73,13 +88,26 @@ export class EmailTemplatesService {
     const template = await this.prisma.emailTemplate.findUnique({
       where: { type },
     });
-    if (template && !template.isActive) {
+    if (
+      template &&
+      !template.isActive &&
+      type !== EmailType.REGISTRATION_CONFIRMATION
+    ) {
       throw new NotFoundException(`The ${type} email template is disabled`);
     }
-    const content = template ?? defaultTemplates[type];
+    const content = template?.isActive ? template : defaultTemplates[type];
+    let html = this.replaceVariables(content.html, payload, true);
+    if (
+      type === EmailType.REGISTRATION_CONFIRMATION &&
+      payload.qrCodeBase64 &&
+      !/<img\b[^>]*\bsrc=["']cid:eventhub-ticket["']/i.test(html)
+    ) {
+      html +=
+        '<p><img src="cid:eventhub-ticket" alt="QR code for your ticket" width="220" height="220"></p>';
+    }
     return {
       subject: this.replaceVariables(content.subject, payload, false),
-      html: this.replaceVariables(content.html, payload, true),
+      html,
       text: content.text
         ? this.replaceVariables(content.text, payload, false)
         : undefined,
@@ -91,10 +119,13 @@ export class EmailTemplatesService {
     payload: EmailPayload,
     escapeHtml: boolean,
   ): string {
-    return template.replace(/\{\{([a-zA-Z0-9_]+)\}\}/g, (_match, key: string) => {
-      const value = payload[key] ?? '';
-      return escapeHtml ? this.escapeHtml(value) : value;
-    });
+    return template.replace(
+      /\{\{([a-zA-Z0-9_]+)\}\}/g,
+      (_match, key: string) => {
+        const value = payload[key] ?? '';
+        return escapeHtml ? this.escapeHtml(value) : value;
+      },
+    );
   }
 
   private escapeHtml(value: string): string {

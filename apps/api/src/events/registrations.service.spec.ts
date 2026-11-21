@@ -68,9 +68,7 @@ describe('RegistrationsService', () => {
     transaction.event.findUnique.mockResolvedValue(registrationEvent());
 
     emailQueue = {
-      createOutboxEntry: jest
-        .fn()
-        .mockResolvedValue({ id: 'email-log-id' }),
+      createOutboxEntry: jest.fn().mockResolvedValue({ id: 'email-log-id' }),
       dispatchLog: jest.fn().mockResolvedValue(undefined),
     };
     const prisma = {
@@ -100,6 +98,15 @@ describe('RegistrationsService', () => {
     );
     expect(emailQueue.createOutboxEntry.mock.calls[0]?.[1].type).toBe(
       EmailType.REGISTRATION_CONFIRMATION,
+    );
+    const confirmationPayload =
+      emailQueue.createOutboxEntry.mock.calls[0]?.[1].payload;
+    expect(confirmationPayload.qrCodeBase64).toBeTruthy();
+    expect(
+      Buffer.from(confirmationPayload.qrCodeBase64, 'base64').subarray(0, 8),
+    ).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    expect(confirmationPayload.ticketUrl).toContain(
+      `/tickets/${encodeURIComponent(result.ticket!.token)}`,
     );
     expect(
       emailQueue.createOutboxEntry.mock.calls.filter(
@@ -134,6 +141,9 @@ describe('RegistrationsService', () => {
     expect(result).not.toHaveProperty('ticket');
     expect(
       transaction.eventRegistration.create.mock.calls[0]?.[0].data.ticket,
+    ).toBeUndefined();
+    expect(
+      emailQueue.createOutboxEntry.mock.calls[0]?.[1].payload.qrCodeBase64,
     ).toBeUndefined();
     expect(emailQueue.createOutboxEntry.mock.calls[0]?.[1].type).toBe(
       EmailType.WAITLIST_CONFIRMATION,
