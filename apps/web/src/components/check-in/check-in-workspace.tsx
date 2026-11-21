@@ -14,7 +14,9 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { staffApi, formatDate, type StaffEvent, type StaffRegistration } from "@/lib/staff-api";
+import { useStaffUser } from "@/components/auth/staff-shell";
 
 type CheckInRecord = {
   id: string;
@@ -26,6 +28,7 @@ type CheckInRecord = {
 const scannerFormats: Html5QrcodeSupportedFormats[] = [Html5QrcodeSupportedFormats.QR_CODE];
 
 export function CheckInWorkspace() {
+  const user = useStaffUser();
   const [events, setEvents] = useState<StaffEvent[]>([]);
   const [eventId, setEventId] = useState("");
   const [attendees, setAttendees] = useState<StaffRegistration[]>([]);
@@ -239,7 +242,7 @@ export function CheckInWorkspace() {
 
       {error && <p className="mt-5 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert"><AlertCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />{error}</p>}
       {message && <p className="mt-5 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800" role="status"><CheckCircle2 aria-hidden="true" className="size-4" />{message}</p>}
-      {!loading && events.length === 0 && !error && (
+      {!loading && events.length === 0 && !error && user?.role === "CHECK_IN_STAFF" && (
         <section
           aria-labelledby="no-assigned-events-heading"
           className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-950"
@@ -259,11 +262,31 @@ export function CheckInWorkspace() {
           </p>
         </section>
       )}
+      {!loading && events.length === 0 && !error && user && user.role !== "CHECK_IN_STAFF" && (
+        <section
+          aria-labelledby="no-events-heading"
+          className="mt-6 rounded-xl border border-slate-200 bg-white p-5 text-slate-800 shadow-sm"
+          role="status"
+        >
+          <h2 className="font-semibold" id="no-events-heading">
+            No events are available for check-in yet
+          </h2>
+          <p className="mt-1 text-sm leading-6 text-slate-600">
+            This workspace has no events. Create an event first, then return here to search attendees or scan tickets.
+          </p>
+          <Link
+            className="mt-3 inline-flex min-h-10 items-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700"
+            href="/dashboard/events/new"
+          >
+            Create an event
+          </Link>
+        </section>
+      )}
 
       <section className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(18rem,0.7fr)]">
         <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
           <div className="flex flex-wrap items-end justify-between gap-4">
-            <label className="min-w-[14rem] flex-1 text-sm font-medium text-slate-700">Assigned event
+            <label className="min-w-[14rem] flex-1 text-sm font-medium text-slate-700">Event
               <select className="mt-1.5 h-11 w-full rounded-xl border border-slate-300 bg-white px-3 outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10" disabled={loading || events.length === 0} onChange={(input) => {
                 setEventId(input.target.value);
                 setSearch("");
