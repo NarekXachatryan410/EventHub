@@ -34,6 +34,10 @@ export class ListCrmCustomersDto {
   status?: CrmCustomerStatus;
 
   @IsOptional()
+  @IsUUID('4')
+  tagId?: string;
+
+  @IsOptional()
   @IsIn(['createdAt', 'name'])
   sortBy: 'createdAt' | 'name' = 'createdAt';
 

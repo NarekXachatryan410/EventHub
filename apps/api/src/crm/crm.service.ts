@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CrmActivityType, CrmCustomerStatus, Prisma, UserRole } from '@prisma/client';
+import { CrmActivityType, CrmCustomerStatus, CrmReminderStatus, Prisma, UserRole } from '@prisma/client';
 import type { AuthUser } from '../auth/auth.types.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { CreateCrmCustomerDto } from './dto/create-crm-customer.dto.js';
@@ -37,6 +37,7 @@ export class CrmService {
     const where: Prisma.CrmCustomerWhereInput = {
       ...(user.role === UserRole.SUPER_ADMIN ? {} : { organizerId: user.sub }),
       ...(query.status ? { status: query.status } : {}),
+      ...(query.tagId ? { tags: { some: { tagId: query.tagId } } } : {}),
       ...(terms.length
         ? {
             AND: terms.map((term) => ({
@@ -230,6 +231,246 @@ export class CrmService {
     });
   }
 
+  async listNotes(user: AuthUser, customerId: string) {
+    await this.getCustomerIdentity(user, customerId);
+    return this.prisma.crmCustomerNote.findMany({
+      where: { customerId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      include: { author: { select: { id: true, firstName: true, lastName: true } } },
+    });
+  }
+
+  async createNote(user: AuthUser, customerId: string, content: string) {
+    await this.getCustomerIdentity(user, customerId);
+    return this.prisma.$transaction(async (tx) => {
+      const note = await tx.crmCustomerNote.create({ data: { customerId, authorId: user.sub, content: content.trim() }, include: { author: { select: { id: true, firstName: true, lastName: true } } } });
+      await tx.crmCustomerActivity.create({ data: { customerId, actorId: user.sub, type: CrmActivityType.NOTE_ADDED, summary: 'Note added', metadata: { noteId: note.id } } });
+      return note;
+    });
+  }
+
+  async updateNote(user: AuthUser, customerId: string, noteId: string, content: string) {
+    await this.getCustomerIdentity(user, customerId);
+    const note = await this.prisma.crmCustomerNote.findFirst({ where: { id: noteId, customerId }, select: { id: true } });
+    if (!note) throw new NotFoundException('CRM note not found');
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.crmCustomerNote.update({ where: { id: noteId }, data: { content: content.trim() }, include: { author: { select: { id: true, firstName: true, lastName: true } } } });
+      await tx.crmCustomerActivity.create({ data: { customerId, actorId: user.sub, type: CrmActivityType.CUSTOMER_UPDATED, summary: 'Customer note updated', metadata: { noteId } } });
+      return updated;
+    });
+  }
+
+  async deleteNote(user: AuthUser, customerId: string, noteId: string) {
+    await this.getCustomerIdentity(user, customerId);
+    const result = await this.prisma.crmCustomerNote.deleteMany({ where: { id: noteId, customerId } });
+    if (!result.count) throw new NotFoundException('CRM note not found');
+    return { success: true as const };
+  }
+
+  async listTags(user: AuthUser, organizerId?: string) {
+    const scopedOrganizer = await this.resolveReadOrganizer(user, organizerId);
+    return this.prisma.crmCustomerTag.findMany({ where: { organizerId: scopedOrganizer }, orderBy: { name: 'asc' }, include: { _count: { select: { customers: true } } } });
+  }
+
+  async createTag(user: AuthUser, input: { name: string; color?: string; organizerId?: string }) {
+    const organizerId = await this.resolveOrganizerId(user, input.organizerId);
+    try { return await this.prisma.crmCustomerTag.create({ data: { organizerId, name: input.name.trim(), color: input.color ?? 'indigo' } }); }
+    catch (error) { if (isUniqueConstraintError(error)) throw new ConflictException('A tag with this name already exists'); throw error; }
+  }
+
+  async deleteTag(user: AuthUser, tagId: string) {
+    const tag = await this.prisma.crmCustomerTag.findFirst({ where: { id: tagId, ...(user.role === UserRole.SUPER_ADMIN ? {} : { organizerId: user.sub }) }, select: { id: true } });
+    if (!tag) throw new NotFoundException('CRM tag not found');
+    await this.prisma.crmCustomerTag.delete({ where: { id: tagId } });
+    return { success: true as const };
+  }
+
+  async assignTag(user: AuthUser, customerId: string, tagId: string) {
+    const customer = await this.getCustomerIdentity(user, customerId);
+    const tag = await this.prisma.crmCustomerTag.findFirst({ where: { id: tagId, organizerId: customer.organizerId }, select: { id: true } });
+    if (!tag) throw new NotFoundException('CRM tag not found');
+    await this.prisma.crmCustomerTagAssignment.upsert({ where: { customerId_tagId: { customerId, tagId } }, create: { customerId, tagId }, update: {} });
+    return { success: true as const };
+  }
+
+  async removeTag(user: AuthUser, customerId: string, tagId: string) {
+    await this.getCustomerIdentity(user, customerId);
+    const result = await this.prisma.crmCustomerTagAssignment.deleteMany({ where: { customerId, tagId } });
+    if (!result.count) throw new NotFoundException('Customer tag assignment not found');
+    return { success: true as const };
+  }
+
+  async listReminders(user: AuthUser, query: { customerId?: string; status?: CrmReminderStatus; overdue?: boolean; assignedToMe?: boolean; limit: number; cursor?: string }) {
+    this.assertAuthorized(user);
+    const now = new Date();
+    const where: Prisma.CrmCustomerReminderWhereInput = {
+      customer: user.role === UserRole.SUPER_ADMIN ? (query.customerId ? { id: query.customerId } : {}) : { organizerId: user.sub, ...(query.customerId ? { id: query.customerId } : {}) },
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.overdue ? { status: CrmReminderStatus.PENDING, dueAt: { lt: now } } : {}),
+      ...(query.assignedToMe ? { assignedToId: user.sub } : {}),
+    };
+    const rows = await this.prisma.crmCustomerReminder.findMany({ where, ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}), orderBy: [{ dueAt: 'asc' }, { id: 'asc' }], take: query.limit + 1, include: { customer: { select: { id: true, firstName: true, lastName: true, email: true, organizerId: true } }, createdBy: { select: { id: true, firstName: true, lastName: true } }, assignedTo: { select: { id: true, firstName: true, lastName: true } } } });
+    return page(rows, query.limit);
+  }
+
+  async createReminder(user: AuthUser, customerId: string, input: { title: string; description?: string | null; dueAt: string; assignedToId?: string | null }) {
+    const customer = await this.getCustomerIdentity(user, customerId);
+    if (input.assignedToId) await this.assertOrganizerUser(customer.organizerId, input.assignedToId);
+    return this.prisma.$transaction(async (tx) => {
+      const reminder = await tx.crmCustomerReminder.create({ data: { customerId, createdById: user.sub, title: input.title.trim(), description: input.description?.trim() || null, dueAt: new Date(input.dueAt), assignedToId: input.assignedToId ?? null } });
+      await tx.crmCustomerActivity.create({ data: { customerId, actorId: user.sub, type: CrmActivityType.REMINDER_CREATED, summary: `Reminder created: ${reminder.title}`, metadata: { reminderId: reminder.id, dueAt: reminder.dueAt.toISOString() } } });
+      return reminder;
+    });
+  }
+
+  async updateReminder(user: AuthUser, customerId: string, reminderId: string, input: { title?: string; description?: string | null; dueAt?: string; assignedToId?: string | null }) {
+    const customer = await this.getCustomerIdentity(user, customerId);
+    const existing = await this.prisma.crmCustomerReminder.findFirst({ where: { id: reminderId, customerId }, select: { id: true } });
+    if (!existing) throw new NotFoundException('CRM reminder not found');
+    if (Object.values(input).every((value) => value === undefined)) throw new BadRequestException('Provide at least one reminder field to update');
+    if (input.assignedToId) await this.assertOrganizerUser(customer.organizerId, input.assignedToId);
+    return this.prisma.crmCustomerReminder.update({ where: { id: reminderId }, data: { ...(input.title !== undefined ? { title: input.title.trim() } : {}), ...(input.description !== undefined ? { description: input.description?.trim() || null } : {}), ...(input.dueAt !== undefined ? { dueAt: new Date(input.dueAt) } : {}), ...(input.assignedToId !== undefined ? { assignedToId: input.assignedToId } : {}) } });
+  }
+
+  async completeReminder(user: AuthUser, customerId: string, reminderId: string) {
+    await this.getCustomerIdentity(user, customerId);
+    const reminder = await this.prisma.crmCustomerReminder.findFirst({ where: { id: reminderId, customerId }, select: { id: true } });
+    if (!reminder) throw new NotFoundException('CRM reminder not found');
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.crmCustomerReminder.update({ where: { id: reminderId }, data: { status: CrmReminderStatus.COMPLETED, completedAt: new Date() } });
+      await tx.crmCustomerActivity.create({ data: { customerId, actorId: user.sub, type: CrmActivityType.REMINDER_COMPLETED, summary: `Reminder completed: ${updated.title}`, metadata: { reminderId } } });
+      return updated;
+    });
+  }
+
+  async deleteReminder(user: AuthUser, customerId: string, reminderId: string) {
+    await this.getCustomerIdentity(user, customerId);
+    const result = await this.prisma.crmCustomerReminder.deleteMany({ where: { id: reminderId, customerId } });
+    if (!result.count) throw new NotFoundException('CRM reminder not found');
+    return { success: true as const };
+  }
+
+  async listActivity(user: AuthUser, customerId: string, limit: number, cursor?: string) {
+    await this.getCustomerIdentity(user, customerId);
+    const before = decodeTimelineCursor(cursor);
+    const activity = await this.prisma.crmCustomerActivity.findMany({ where: { customerId, ...(before ? { occurredAt: { lt: before } } : {}) }, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], take: limit + 1, include: { actor: { select: { id: true, firstName: true, lastName: true } }, event: { select: { id: true, title: true } } } });
+    const notes = await this.prisma.crmCustomerNote.findMany({ where: { customerId, ...(before ? { createdAt: { lt: before } } : {}) }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: limit + 1, include: { author: { select: { id: true, firstName: true, lastName: true } } } });
+    const reminders = await this.prisma.crmCustomerReminder.findMany({ where: { customerId, ...(before ? { createdAt: { lt: before } } : {}) }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: limit + 1 });
+    const registrationEvents = await this.prisma.eventRegistration.findMany({ where: { crmCustomerId: customerId, ...(before ? { registeredAt: { lt: before } } : {}) }, orderBy: [{ registeredAt: 'desc' }, { id: 'desc' }], take: limit + 1, select: { id: true, eventId: true, registeredAt: true, status: true, event: { select: { title: true } } } });
+    const checkIns = await this.prisma.checkIn.findMany({ where: { ticket: { registration: { crmCustomerId: customerId } }, ...(before ? { checkedInAt: { lt: before } } : {}) }, orderBy: [{ checkedInAt: 'desc' }, { id: 'desc' }], take: limit + 1, select: { id: true, checkedInAt: true, staff: { select: { id: true, firstName: true, lastName: true } }, ticket: { select: { registration: { select: { event: { select: { id: true, title: true } } } } } } } });
+    const entries = [
+      ...activity.map((item) => ({ id: `activity:${item.id}`, type: item.type, summary: item.summary, occurredAt: item.occurredAt, actor: item.actor, event: item.event, metadata: item.metadata })),
+      ...notes.map((item) => ({ id: `note:${item.id}`, type: CrmActivityType.NOTE_ADDED, summary: 'Note added', occurredAt: item.createdAt, actor: item.author, metadata: { noteId: item.id, content: item.content } })),
+      ...reminders.map((item) => ({ id: `reminder:${item.id}`, type: item.status === CrmReminderStatus.COMPLETED ? CrmActivityType.REMINDER_COMPLETED : CrmActivityType.REMINDER_CREATED, summary: `Reminder ${item.status.toLowerCase()}: ${item.title}`, occurredAt: item.updatedAt, metadata: { reminderId: item.id, dueAt: item.dueAt, status: item.status } })),
+      ...registrationEvents.map((item) => ({ id: `registration:${item.id}`, type: CrmActivityType.REGISTRATION_CREATED, summary: `Registered for ${item.event.title}`, occurredAt: item.registeredAt, event: { id: item.eventId, title: item.event.title }, metadata: { registrationId: item.id, status: item.status } })),
+      ...checkIns.map((item) => ({ id: `checkin:${item.id}`, type: CrmActivityType.CHECKED_IN, summary: `Checked in to ${item.ticket.registration.event.title}`, occurredAt: item.checkedInAt, actor: item.staff, event: item.ticket.registration.event, metadata: {} })),
+    ].sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime() || b.id.localeCompare(a.id));
+    const items = entries.slice(0, limit);
+    return { items, nextCursor: entries.length > limit ? encodeTimelineCursor(items.at(-1)!.occurredAt) : null };
+  }
+
+  async previewSegment(user: AuthUser, criteria: SegmentCriteria, organizerId?: string) {
+    const scopedOrganizer = await this.resolveReadOrganizer(user, organizerId);
+    const where = await this.segmentWhere(scopedOrganizer, criteria);
+    const [total, customers] = await Promise.all([
+      this.prisma.crmCustomer.count({ where }),
+      this.prisma.crmCustomer.findMany({ where, select: { id: true, email: true, firstName: true, lastName: true, status: true, _count: { select: { registrations: true } } }, orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }, { id: 'asc' }], take: 100 }),
+    ]);
+    return { total, items: customers };
+  }
+
+  async saveSegment(user: AuthUser, input: { name: string; description?: string; criteria: SegmentCriteria; organizerId?: string }) {
+    const organizerId = await this.resolveOrganizerId(user, input.organizerId);
+    const criteria = validateSegmentCriteria(input.criteria);
+    await this.segmentWhere(organizerId, criteria);
+    try { return await this.prisma.crmCustomerSegment.create({ data: { organizerId, createdById: user.sub, name: input.name.trim(), description: input.description?.trim() || null, criteria: criteria as Prisma.InputJsonValue } }); }
+    catch (error) { if (isUniqueConstraintError(error)) throw new ConflictException('A segment with this name already exists'); throw error; }
+  }
+
+  async listSegments(user: AuthUser, organizerId?: string) {
+    const scopedOrganizer = await this.resolveReadOrganizer(user, organizerId);
+    const segments = await this.prisma.crmCustomerSegment.findMany({ where: { organizerId: scopedOrganizer }, orderBy: { name: 'asc' } });
+    return Promise.all(segments.map(async (segment) => {
+      const criteria = segment.criteria as unknown as SegmentCriteria;
+      const where = await this.segmentWhere(scopedOrganizer, criteria);
+      const matching = await this.prisma.crmCustomer.findMany({ where, select: { id: true } });
+      await this.prisma.$transaction(async (tx) => {
+        await tx.crmCustomerSegmentMembership.deleteMany({ where: { segmentId: segment.id } });
+        if (matching.length) {
+          await tx.crmCustomerSegmentMembership.createMany({
+            data: matching.map(({ id }) => ({ segmentId: segment.id, customerId: id })),
+            skipDuplicates: true,
+          });
+        }
+      });
+      const ids = matching.slice(0, 100).map(({ id }) => id);
+      const members = ids.length ? await this.prisma.crmCustomer.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, email: true, firstName: true, lastName: true, status: true, _count: { select: { registrations: true } } },
+        orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }, { id: 'asc' }],
+      }) : [];
+      return { ...segment, total: matching.length, items: members };
+    }));
+  }
+
+  async deleteSegment(user: AuthUser, segmentId: string) {
+    const result = await this.prisma.crmCustomerSegment.deleteMany({ where: { id: segmentId, ...(user.role === UserRole.SUPER_ADMIN ? {} : { organizerId: user.sub }), isSystem: false } });
+    if (!result.count) throw new NotFoundException('CRM segment not found');
+    return { success: true as const };
+  }
+
+  private async segmentWhere(organizerId: string, criteria: SegmentCriteria): Promise<Prisma.CrmCustomerWhereInput> {
+    const safe = validateSegmentCriteria(criteria);
+    if (safe.tagIds?.length) {
+      const count = await this.prisma.crmCustomerTag.count({ where: { organizerId, id: { in: safe.tagIds } } });
+      if (count !== safe.tagIds.length) throw new BadRequestException('Segment contains a tag outside this organizer');
+    }
+    const registrationDates: Prisma.DateTimeFilter = {};
+    if (safe.registeredAfter) registrationDates.gte = new Date(safe.registeredAfter);
+    if (safe.registeredBefore) registrationDates.lte = new Date(safe.registeredBefore);
+    const registrationFilter: Prisma.EventRegistrationWhereInput =
+      safe.registeredAfter || safe.registeredBefore
+        ? { registeredAt: registrationDates }
+        : {};
+    let customerIds: string[] | undefined;
+    if (safe.minTickets !== undefined || safe.maxTickets !== undefined || safe.attended !== undefined) {
+      const candidates = await this.prisma.crmCustomer.findMany({
+        where: { organizerId },
+        select: {
+          id: true,
+          registrations: {
+            select: { ticket: { select: { id: true, checkIn: { select: { id: true } } } } },
+          },
+        },
+      });
+      customerIds = candidates.filter((customer) => {
+        const tickets = customer.registrations.flatMap((registration) => registration.ticket ? [registration.ticket] : []);
+        return (safe.minTickets === undefined || tickets.length >= safe.minTickets) && (safe.maxTickets === undefined || tickets.length <= safe.maxTickets) && (safe.attended === undefined || tickets.some((ticket) => Boolean(ticket.checkIn)) === safe.attended);
+      }).map((customer) => customer.id);
+    }
+    return {
+      organizerId,
+      ...(safe.status ? { status: safe.status } : {}),
+      ...(safe.tagIds?.length ? { tags: { some: { tagId: { in: safe.tagIds } } } } : {}),
+      ...(safe.registeredAfter || safe.registeredBefore ? { registrations: { some: registrationFilter } } : {}),
+      ...(customerIds ? { id: { in: customerIds } } : {}),
+    };
+  }
+
+  private async resolveReadOrganizer(user: AuthUser, organizerId?: string) {
+    this.assertAuthorized(user);
+    if (user.role !== UserRole.SUPER_ADMIN) {
+      if (organizerId && organizerId !== user.sub) throw new NotFoundException('Organizer not found');
+      return user.sub;
+    }
+    if (!organizerId) throw new BadRequestException('Super Admin must choose an organizer');
+    return (await this.resolveOrganizerId(user, organizerId));
+  }
+
+  private async assertOrganizerUser(organizerId: string, userId: string) {
+    const user = await this.prisma.user.findFirst({ where: { id: userId, isActive: true, role: { in: [UserRole.EVENT_MANAGER, UserRole.SUPER_ADMIN] } }, select: { id: true } });
+    if (!user || userId !== organizerId) throw new NotFoundException('Assignee not found for this organizer');
+  }
+
   async upsertFromRegistration(
     transaction: Prisma.TransactionClient,
     input: RegistrationCustomerInput,
@@ -330,6 +571,46 @@ export class CrmService {
 
 export function normalizeCustomerEmail(email: string): string {
   return email.trim().toLowerCase();
+}
+
+type SegmentCriteria = {
+  status?: CrmCustomerStatus;
+  registeredAfter?: string;
+  registeredBefore?: string;
+  minTickets?: number;
+  maxTickets?: number;
+  attended?: boolean;
+  tagIds?: string[];
+};
+
+function validateSegmentCriteria(criteria: SegmentCriteria): SegmentCriteria {
+  if (!criteria || typeof criteria !== 'object' || Array.isArray(criteria)) throw new BadRequestException('Segment criteria must be an object');
+  const allowed = new Set(['status', 'registeredAfter', 'registeredBefore', 'minTickets', 'maxTickets', 'attended', 'tagIds']);
+  if (Object.keys(criteria).some((key) => !allowed.has(key))) throw new BadRequestException('Segment contains an unsupported filter');
+  if (criteria.registeredAfter && criteria.registeredBefore && new Date(criteria.registeredAfter) > new Date(criteria.registeredBefore)) throw new BadRequestException('Registration date range is invalid');
+  if (criteria.minTickets !== undefined && criteria.maxTickets !== undefined && criteria.minTickets > criteria.maxTickets) throw new BadRequestException('Ticket count range is invalid');
+  return criteria;
+}
+
+function page<T extends { id: string }>(rows: T[], limit: number) {
+  const hasMore = rows.length > limit;
+  const items = hasMore ? rows.slice(0, limit) : rows;
+  return { items, nextCursor: hasMore ? items.at(-1)?.id ?? null : null };
+}
+
+function encodeTimelineCursor(date: Date): string {
+  return Buffer.from(date.toISOString()).toString('base64url');
+}
+
+function decodeTimelineCursor(cursor?: string): Date | undefined {
+  if (!cursor) return undefined;
+  try {
+    const date = new Date(Buffer.from(cursor, 'base64url').toString('utf8'));
+    if (!Number.isFinite(date.getTime())) throw new Error('Invalid cursor');
+    return date;
+  } catch {
+    throw new BadRequestException('Invalid activity cursor');
+  }
 }
 
 function normalizeOptional(value: string | null | undefined): string | null {

@@ -6,6 +6,9 @@ import {
   CalendarDays,
   ClipboardCheck,
   ClipboardList,
+  ContactRound,
+  BellRing,
+  Tags,
   LayoutDashboard,
   LogOut,
   Mail,
@@ -87,6 +90,30 @@ const navigation: NavigationItem[] = [
     roles: ["SUPER_ADMIN", "EVENT_MANAGER"],
   },
   {
+    href: "/dashboard/crm",
+    label: "CRM overview",
+    icon: ContactRound,
+    roles: ["SUPER_ADMIN", "EVENT_MANAGER"],
+  },
+  {
+    href: "/dashboard/crm/customers",
+    label: "Customers",
+    icon: Users,
+    roles: ["SUPER_ADMIN", "EVENT_MANAGER"],
+  },
+  {
+    href: "/dashboard/crm/segments",
+    label: "Segments",
+    icon: Tags,
+    roles: ["SUPER_ADMIN", "EVENT_MANAGER"],
+  },
+  {
+    href: "/dashboard/crm/reminders",
+    label: "Reminders",
+    icon: BellRing,
+    roles: ["SUPER_ADMIN", "EVENT_MANAGER"],
+  },
+  {
     href: "/dashboard/audit-logs",
     label: "Audit Logs",
     icon: ScrollText,
@@ -101,6 +128,7 @@ const restrictedPaths: { path: string; roles: StaffRole[] }[] = [
   { path: "/dashboard/email-logs", roles: ["SUPER_ADMIN", "EVENT_MANAGER"] },
   { path: "/dashboard/planning", roles: ["SUPER_ADMIN", "EVENT_MANAGER"] },
   { path: "/dashboard/analytics", roles: ["SUPER_ADMIN", "EVENT_MANAGER"] },
+  { path: "/dashboard/crm", roles: ["SUPER_ADMIN", "EVENT_MANAGER"] },
   { path: "/dashboard/audit-logs", roles: ["SUPER_ADMIN"] },
 ];
 
@@ -224,7 +252,7 @@ function StaffWorkspace({ children }: { children: ReactNode }) {
             {visibleNavigation.map((item) => {
               const active =
                 pathname === item.href ||
-                (item.href !== "/dashboard" && pathname.startsWith(`${item.href}/`));
+                (item.href !== "/dashboard" && item.href !== "/dashboard/crm" && pathname.startsWith(`${item.href}/`));
               const Icon = item.icon;
               return (
                 <Link
@@ -299,7 +327,7 @@ function StaffWorkspace({ children }: { children: ReactNode }) {
               {visibleNavigation.map((item) => {
                 const active =
                   pathname === item.href ||
-                  (item.href !== "/dashboard" && pathname.startsWith(`${item.href}/`));
+                  (item.href !== "/dashboard" && item.href !== "/dashboard/crm" && pathname.startsWith(`${item.href}/`));
                 const Icon = item.icon;
                 return (
                   <Link
