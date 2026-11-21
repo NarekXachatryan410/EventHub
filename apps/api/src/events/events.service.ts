@@ -7,7 +7,6 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
-  CrmSyncStatus,
   EventStatus,
   Prisma,
   UserRole,
@@ -330,13 +329,6 @@ export class EventsService {
         },
       });
       if (!current) throw new NotFoundException('Event not found');
-      const event = await transaction.event.update({
-        where: { id: eventId },
-        data: {
-          status: EventStatus.CANCELLED,
-          registrationEnabled: false,
-        },
-      });
       const emailLogIds: string[] = [];
       for (const registration of current.registrations) {
         const log = await this.emailQueue.createOutboxEntry(transaction, {
@@ -347,43 +339,19 @@ export class EventsService {
         });
         emailLogIds.push(log.id);
       }
-      await transaction.emailLog.updateMany({
+      // Keep only the cancellation outbox rows so they can finish delivery
+      // after the event and its attendee records are removed.
+      await transaction.emailLog.deleteMany({
         where: {
           registration: { eventId },
-          type: 'EVENT_REMINDER',
-          status: 'PENDING',
-        },
-        data: { status: 'CANCELLED', errorMessage: 'Event cancelled' },
-      });
-      await transaction.eventRegistration.updateMany({
-        where: {
-          eventId,
-          status: { in: ['PENDING', 'CONFIRMED', 'WAITLISTED'] },
-        },
-        data: { status: 'CANCELLED' },
-      });
-      await transaction.crmSyncLog.updateMany({
-        where: { registration: { eventId } },
-        data: {
-          status: CrmSyncStatus.PENDING,
-          attempts: 0,
-          lastAttemptAt: null,
-          errorMessage: null,
-          syncedAt: null,
-          version: { increment: 1 },
+          type: { not: 'EVENT_CANCELLATION' },
         },
       });
-      await transaction.ticket.updateMany({
-        where: {
-          registration: { eventId },
-          status: { in: ['VALID', 'CHECKED_IN'] },
-        },
-        data: { status: 'CANCELLED' },
-      });
-      return { event, emailLogIds };
+      await transaction.event.delete({ where: { id: eventId } });
+      return { emailLogIds };
     });
     await Promise.all(result.emailLogIds.map((id) => this.dispatchEmail(id)));
-    return result.event;
+    return { success: true };
   }
 
   async complete(eventId: string, user: AuthUser) {
@@ -459,20 +427,23 @@ export class EventsService {
 
   async closeRegistration(eventId: string, user: AuthUser) {
     await this.access.requireEditAccess(eventId, user);
-    const current = await this.prisma.event.findUnique({
-      where: { id: eventId },
-      select: { status: true },
-    });
-    if (!current) throw new NotFoundException('Event not found');
-    if (current.status !== EventStatus.PUBLISHED) {
-      throw new ConflictException('Registration can only be closed for published events');
-    }
-    return this.prisma.event.update({
-      where: { id: eventId },
-      data: {
-        status: EventStatus.REGISTRATION_CLOSED,
-        registrationEnabled: false,
-      },
+    return this.prisma.$transaction(async (transaction) => {
+      await transaction.$queryRaw<Array<{ id: string }>>`
+        SELECT "id" FROM "Event" WHERE "id" = ${eventId}::uuid FOR UPDATE
+      `;
+      const current = await transaction.event.findUnique({
+        where: { id: eventId },
+        select: { status: true },
+      });
+      if (!current) throw new NotFoundException('Event not found');
+      if (current.status !== EventStatus.PUBLISHED) {
+        throw new ConflictException('Registration can only be closed for published events');
+      }
+      await transaction.emailLog.deleteMany({
+        where: { registration: { eventId } },
+      });
+      await transaction.event.delete({ where: { id: eventId } });
+      return { success: true };
     });
   }
 

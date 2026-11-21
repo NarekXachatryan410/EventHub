@@ -178,6 +178,14 @@ export function EventEditor({ eventId }: { eventId?: string }) {
     setError(null);
     setNotice(null);
     try {
+      if (path === "cancel" || path === "close-registration") {
+        await staffApi<{ success: boolean }>(`/events/${eventId}/${path}`, {
+          method: "PATCH",
+        });
+        router.replace("/dashboard/events");
+        router.refresh();
+        return;
+      }
       const updated = await staffApi<StaffEvent>(`/events/${eventId}/${path}`, { method: "PATCH" });
       setCurrentEvent(updated);
       setNotice(
@@ -257,10 +265,10 @@ export function EventEditor({ eventId }: { eventId?: string }) {
                 <ActionButton primary disabled={Boolean(action)} onClick={() => void changeStatus("publish", "Publish this event? It will become publicly visible.")}><Send aria-hidden="true" className="size-4" />Publish</ActionButton>
               )}
               {currentEvent.status === "PUBLISHED" && currentEvent.registrationEnabled && (
-                <ActionButton disabled={Boolean(action)} onClick={() => void changeStatus("close-registration", "Close registration for this event?")}><XCircle aria-hidden="true" className="size-4" />Close registration</ActionButton>
+                <ActionButton danger disabled={Boolean(action)} onClick={() => void changeStatus("close-registration", "Permanently delete this event and all registrations, tickets, feedback, planning data, and related records? This cannot be undone.")}><XCircle aria-hidden="true" className="size-4" />Close registration & delete</ActionButton>
               )}
               <ActionButton disabled={Boolean(action)} onClick={() => void changeStatus("complete", "Mark this event completed? Registration will be disabled.")}><Check aria-hidden="true" className="size-4" />Mark completed</ActionButton>
-              <ActionButton danger disabled={Boolean(action)} onClick={() => void changeStatus("cancel", "Cancel this event? Active registrations and tickets will also be cancelled.")}><XCircle aria-hidden="true" className="size-4" />Cancel event</ActionButton>
+              <ActionButton danger disabled={Boolean(action)} onClick={() => void changeStatus("cancel", "Permanently delete this cancelled event and all registrations, tickets, feedback, planning data, and related records? Cancellation emails will still be queued. This cannot be undone.")}><XCircle aria-hidden="true" className="size-4" />Cancel & delete event</ActionButton>
             </>
           )}
           {currentEvent.status !== "ARCHIVED" && (

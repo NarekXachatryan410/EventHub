@@ -35,6 +35,7 @@ describe('EventsService date validation', () => {
       event: {
         findUnique: jest.fn(),
         update: jest.fn().mockResolvedValue({ id: 'event-id' }),
+        delete: jest.fn().mockResolvedValue({ id: 'event-id' }),
       },
       eventRegistration: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       ticket: {
@@ -43,6 +44,7 @@ describe('EventsService date validation', () => {
       },
       emailLog: {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
         findUnique: jest.fn().mockResolvedValue(null),
       },
       crmSyncLog: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
@@ -100,12 +102,16 @@ describe('EventsService date validation', () => {
           idempotencyKey: 'event-cancelled:registration-id',
         }),
       );
-      expect(transaction.emailLog.updateMany).toHaveBeenCalledWith(
+      expect(transaction.emailLog.deleteMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ type: 'EVENT_REMINDER', status: 'PENDING' }),
-          data: expect.objectContaining({ status: 'CANCELLED' }),
+          where: expect.objectContaining({
+            type: { not: 'EVENT_CANCELLATION' },
+          }),
         }),
       );
+      expect(transaction.event.delete).toHaveBeenCalledWith({
+        where: { id: 'event-id' },
+      });
       expect(queue.dispatchLog).toHaveBeenCalledWith('email-log-id');
     });
 

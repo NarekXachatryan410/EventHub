@@ -66,7 +66,7 @@ export type StaffEmailLog = {
     firstName: string;
     lastName: string;
     event: { id: string; title: string };
-  };
+  } | null;
 };
 
 export async function staffApi<T>(

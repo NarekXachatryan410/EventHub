@@ -44,8 +44,8 @@ export function EmailLogsPage() {
   const visible = logs.filter((log) => {
     const term = search.trim().toLowerCase();
     return !term ||
-      log.registration.event.title.toLowerCase().includes(term) ||
-      log.registration.email.toLowerCase().includes(term) ||
+      (log.registration?.event.title ?? "deleted event").toLowerCase().includes(term) ||
+      (log.registration?.email ?? "").toLowerCase().includes(term) ||
       log.type.toLowerCase().includes(term);
   });
 
@@ -86,7 +86,7 @@ export function EmailLogsPage() {
         {loading ? <p className="px-5 py-12 text-center text-sm text-slate-500" role="status">Loading email logs…</p> : visible.length === 0 ? <div className="px-5 py-14 text-center"><Mail aria-hidden="true" className="mx-auto size-9 text-slate-300" /><p className="mt-3 font-semibold">{logs.length ? "No matching email logs" : "No emails queued yet"}</p><p className="mt-1 text-sm text-slate-500">New delivery attempts appear here when registrations and reminders are processed.</p></div> : (
           <div className="divide-y divide-slate-100">
             {visible.map((log) => <article className="grid gap-3 px-5 py-4 sm:grid-cols-[minmax(12rem,1fr)_minmax(10rem,0.7fr)_8rem_10rem]" key={log.id}>
-              <div className="min-w-0"><p className="truncate text-sm font-semibold">{log.registration.event.title}</p><p className="mt-1 truncate text-sm text-slate-600">{log.registration.email}</p><p className="mt-1 text-xs text-slate-400">{log.type.replaceAll("_", " ")}</p></div>
+              <div className="min-w-0"><p className="truncate text-sm font-semibold">{log.registration?.event.title ?? "Deleted event"}</p><p className="mt-1 truncate text-sm text-slate-600">{log.registration?.email ?? "Attendee details removed"}</p><p className="mt-1 text-xs text-slate-400">{log.type.replaceAll("_", " ")}</p></div>
               <div><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${["SENT", "DELIVERED"].includes(log.status) ? "bg-emerald-50 text-emerald-700" : ["FAILED", "BOUNCED", "COMPLAINED", "SUPPRESSED"].includes(log.status) ? "bg-red-50 text-red-700" : log.status === "CANCELLED" ? "bg-slate-100 text-slate-600" : "bg-amber-50 text-amber-700"}`}>{log.status.replaceAll("_", " ")}</span><p className="mt-1.5 text-xs text-slate-500">{log.attempts} attempt{log.attempts === 1 ? "" : "s"}</p>{log.status === "FAILED" && log.errorMessage && <p className="mt-1 line-clamp-2 text-xs text-red-700">{log.errorMessage}</p>}{log.status === "FAILED" && <button className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-lg border border-red-200 bg-white px-2.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50" disabled={retryingId === log.id} onClick={() => retry(log.id)} type="button"><RefreshCw aria-hidden="true" className={`size-3 ${retryingId === log.id ? "animate-spin" : ""}`} />{retryingId === log.id ? "Retrying…" : "Retry email"}</button>}</div>
               <p className="text-xs text-slate-500 sm:pt-1.5">{log.sentAt ? `Sent ${formatDate(log.sentAt)}` : `Queued ${formatDate(log.createdAt)}`}</p>
               <p className="text-xs text-slate-500 sm:text-right sm:pt-1.5">{log.scheduledAt > log.createdAt ? `Scheduled ${formatDate(log.scheduledAt)}` : "Immediate"}</p>

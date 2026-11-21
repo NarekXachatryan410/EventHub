@@ -186,8 +186,8 @@ model CheckIn {
 
 model EmailLog {
   id                String            @id @default(uuid()) @db.Uuid
-  registrationId    String            @db.Uuid
-  registration      EventRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  registrationId    String?           @db.Uuid
+  registration      EventRegistration? @relation(fields: [registrationId], references: [id], onDelete: SetNull)
   templateId        String?           @db.Uuid
   template          EmailTemplate?    @relation(fields: [templateId], references: [id], onDelete: SetNull)
   type              EmailType
