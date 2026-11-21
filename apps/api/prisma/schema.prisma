@@ -70,13 +70,6 @@ enum EmailStatus {
   CANCELLED
 }
 
-enum CrmSyncStatus {
-  PENDING
-  PROCESSING
-  SYNCED
-  FAILED
-}
-
 enum PlanningTaskStatus {
   NOT_STARTED
   IN_PROGRESS
@@ -155,7 +148,6 @@ model EventRegistration {
   ticket                Ticket?
   emailLogs             EmailLog[]
   feedback              Feedback?
-  crmSyncLog            CrmSyncLog?
 
   @@unique([eventId, normalizedEmail])
   @@index([eventId, status])
@@ -243,25 +235,6 @@ model EventStaffAssignment {
 
   @@unique([eventId, staffId])
   @@index([staffId])
-}
-
-model CrmSyncLog {
-  id             String            @id @default(uuid()) @db.Uuid
-  registrationId String            @unique @db.Uuid
-  registration   EventRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
-  status         CrmSyncStatus     @default(PENDING)
-  contactId      String?
-  leadId         String?
-  errorMessage   String?
-  attempts       Int               @default(0)
-  version        Int               @default(0)
-  lastAttemptAt  DateTime?         @db.Timestamptz(6)
-  syncedAt       DateTime?         @db.Timestamptz(6)
-  createdAt      DateTime          @default(now()) @db.Timestamptz(6)
-  updatedAt      DateTime          @updatedAt @db.Timestamptz(6)
-
-  @@index([status, updatedAt])
-  @@index([status, attempts, lastAttemptAt])
 }
 
 model PlanningTemplate {

@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS "CrmSyncLog";
+DROP TYPE IF EXISTS "CrmSyncStatus";

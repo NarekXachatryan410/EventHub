@@ -13,7 +13,6 @@ describe('RegistrationsService', () => {
   let transaction: {
     $queryRaw: jest.Mock;
     event: { findUnique: jest.Mock };
-    crmSyncLog: { upsert: jest.Mock };
     eventRegistration: {
       count: jest.Mock;
       create: jest.Mock;
@@ -53,7 +52,6 @@ describe('RegistrationsService', () => {
     transaction = {
       $queryRaw: jest.fn().mockResolvedValue([{ id: eventId }]),
       event: { findUnique: jest.fn() },
-      crmSyncLog: { upsert: jest.fn().mockResolvedValue({}) },
       eventRegistration: {
         count: jest.fn().mockResolvedValue(0),
         create: jest.fn().mockImplementation(async ({ data }) => ({
@@ -86,7 +84,6 @@ describe('RegistrationsService', () => {
       { requireManageAccess: jest.fn() } as never,
       emailQueue as never,
       { get: jest.fn().mockReturnValue('http://localhost:3000') } as never,
-      { scheduleRegistrationSync: jest.fn().mockResolvedValue({}) } as never,
     );
   });
 
@@ -210,7 +207,6 @@ describe('RegistrationsService', () => {
       { requireManageAccess: jest.fn().mockResolvedValue(undefined) } as never,
       emailQueue as never,
       { get: jest.fn() } as never,
-      { scheduleRegistrationSync: jest.fn() } as never,
     );
 
     const result = await listService.listPage(

@@ -8,7 +8,6 @@ import {
   ClipboardList,
   LayoutDashboard,
   LogOut,
-  Link2,
   Mail,
   QrCode,
   Shield,
@@ -93,12 +92,6 @@ const navigation: NavigationItem[] = [
     icon: ScrollText,
     roles: ["SUPER_ADMIN"],
   },
-  {
-    href: "/dashboard/crm-sync",
-    label: "CRM Sync",
-    icon: Link2,
-    roles: ["SUPER_ADMIN"],
-  },
 ];
 
 const restrictedPaths: { path: string; roles: StaffRole[] }[] = [
@@ -109,7 +102,6 @@ const restrictedPaths: { path: string; roles: StaffRole[] }[] = [
   { path: "/dashboard/planning", roles: ["SUPER_ADMIN", "EVENT_MANAGER"] },
   { path: "/dashboard/analytics", roles: ["SUPER_ADMIN", "EVENT_MANAGER"] },
   { path: "/dashboard/audit-logs", roles: ["SUPER_ADMIN"] },
-  { path: "/dashboard/crm-sync", roles: ["SUPER_ADMIN"] },
 ];
 
 export function useStaffUser(): StaffUser | null {

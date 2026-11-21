@@ -21,7 +21,6 @@ import QRCode from 'qrcode';
 import type { AuthUser } from '../auth/auth.types.js';
 import { EmailQueueService } from '../email/email-queue.service.js';
 import type { EmailPayload } from '../email/email.types.js';
-import { CrmSyncService } from '../crm/crm-sync.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { EventAccessService } from './event-access.service.js';
 import type {
@@ -60,7 +59,6 @@ export class RegistrationsService {
     private readonly access: EventAccessService,
     private readonly emailQueue: EmailQueueService,
     private readonly config: ConfigService,
-    private readonly crmSync: CrmSyncService,
   ) {}
 
   async register(eventId: string, input: CreateRegistrationDto) {
@@ -285,7 +283,6 @@ export class RegistrationsService {
         where: { id: registration.id },
         data: { status: RegistrationStatus.CANCELLED },
       });
-      await this.crmSync.scheduleRegistrationSync(transaction, registration.id);
       if (registration.ticket) {
         await transaction.ticket.update({
           where: { id: registration.ticket.id },
@@ -338,10 +335,6 @@ export class RegistrationsService {
               },
             },
           });
-          await this.crmSync.scheduleRegistrationSync(
-            transaction,
-            nextWaitlisted.id,
-          );
           const promotionEmail = await this.emailQueue.createOutboxEntry(
             transaction,
             {
@@ -459,10 +452,6 @@ export class RegistrationsService {
             ticket: { select: { id: true } },
           },
         });
-        await this.crmSync.scheduleRegistrationSync(
-          transaction,
-          registration.id,
-        );
 
         const emailType =
           status === RegistrationStatus.WAITLISTED

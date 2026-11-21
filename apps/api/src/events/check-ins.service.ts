@@ -9,7 +9,6 @@ import {
 } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import QRCode from 'qrcode';
-import { CrmSyncService } from '../crm/crm-sync.service.js';
 import type { AuthUser } from '../auth/auth.types.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { EventAccessService } from './event-access.service.js';
@@ -19,7 +18,6 @@ export class CheckInsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly access: EventAccessService,
-    private readonly crmSync: CrmSyncService,
   ) {}
 
   async validateTicket(token: string) {
@@ -162,10 +160,6 @@ export class CheckInsService {
         where: { id: ticket.id },
         data: { status: TicketStatus.CHECKED_IN },
       });
-      await this.crmSync.scheduleRegistrationSync(
-        transaction,
-        ticket.registration.id,
-      );
       return {
         success: true,
         checkedInAt: checkedIn.checkedInAt,

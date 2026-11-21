@@ -20,7 +20,7 @@ docker compose up --build
 ```
 
 Compose starts PostgreSQL with the database named `eventhub`, Redis, the API, and the web app. The API applies checked-in Prisma migrations on startup.
-The Prisma schema includes users, events, registrations, tickets, check-ins, email logs, email templates, CRM synchronization logs, and feedback. Registration writes normalize email addresses; passwords, QR ticket tokens, and self-cancellation tokens are stored as hashes.
+The Prisma schema includes users, events, registrations, tickets, check-ins, email logs, email templates, and feedback. Registration writes normalize email addresses; passwords, QR ticket tokens, and self-cancellation tokens are stored as hashes.
 
 - Web app: http://localhost:3000
 - API health: http://localhost:4000/api/health
@@ -47,8 +47,6 @@ Ticket validation is available at `GET /api/tickets/:token`; the emailed ticket 
 Checked-in attendees can submit feedback from the post-event email link at `POST /api/feedback`. Feedback tokens are random and stored as hashes. Event Managers and Super Admins can view individual feedback and aggregate statistics at `/api/events/:eventId/feedback` and `/feedback/analytics`, and download per-event CSV reports at `/api/events/:eventId/feedback/export`. The dashboards provide registration trends, attendance/no-show rates, event performance, and overall feedback ratings.
 
 Event Managers and Super Admins can create graduation, guest-visit, partner-event, and custom planning checklists from `/dashboard/planning`. Checklist tasks support staff assignments, due dates, status tracking, and completion timestamps. Registration lists use cursor pagination and search across attendee names, email, and organization. Staff mutations are recorded in the Super Admin audit log; request bodies and attendee data are intentionally excluded.
-
-CRM delivery is durable and retried from the database-backed sync log. Set `NAVIGATOR_API_URL` to a complete HTTPS-compatible upsert endpoint and `NAVIGATOR_API_KEY` to a bearer token. The generic adapter sends `POST` requests with an `Idempotency-Key` header and a JSON object containing `schemaVersion`, `source`, `upsertBy: "contact.email"`, `contact`, and `eventRegistration`. The endpoint must upsert contacts by normalized email and return JSON with a non-empty `contactId` and optional `leadId`. Registration status and check-in timestamps are included; EventHub treats someone as attended only when a check-in record exists. This is a documented adapter contract, not a claim that an unconfigured Navigator tenant has been connected. Super Admins can inspect and retry failures at `/dashboard/crm-sync`.
 
 Email failures remain visible in `/dashboard/email-logs` and can be manually retried after Resend credentials are configured. Delivery, delay, bounce, complaint, suppression, and provider-failure updates are verified using Resend's signed webhook at `POST /api/webhooks/resend`; configure the webhook in Resend for the `email.delivered`, `email.delivery_delayed`, `email.bounced`, `email.complained`, `email.suppressed`, and `email.failed` events, then set `RESEND_WEBHOOK_SECRET` to the signing secret Resend provides. The API preserves the raw request body for signature verification and acknowledges unknown event types without changing email logs. Login, public registration, feedback, and cancellation endpoints are rate limited. Production startup rejects placeholder secrets, missing Resend settings, and non-HTTPS frontend origins. Swagger documentation is available at `/api/docs`.
 

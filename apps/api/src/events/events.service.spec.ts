@@ -47,7 +47,6 @@ describe('EventsService date validation', () => {
         deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
         findUnique: jest.fn().mockResolvedValue(null),
       },
-      crmSyncLog: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     };
     const prisma = {
       $transaction: jest.fn(async (callback: (tx: typeof transaction) => Promise<unknown>) =>
