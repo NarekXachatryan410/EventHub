@@ -13,6 +13,7 @@ describe('CheckInsService', () => {
     $queryRaw: jest.Mock;
     ticket: { findUnique: jest.Mock; update: jest.Mock };
     checkIn: { create: jest.Mock };
+    crmCustomerActivity: { create: jest.Mock };
   };
   let prisma: {
     $transaction: jest.Mock;
@@ -32,6 +33,7 @@ describe('CheckInsService', () => {
           checkedInAt: new Date('2030-05-10T09:00:00.000Z'),
         }),
       },
+      crmCustomerActivity: { create: jest.fn().mockResolvedValue({}) },
     };
     prisma = {
       $transaction: jest.fn(
@@ -85,9 +87,11 @@ describe('CheckInsService', () => {
       registration: {
         id: 'registration-id',
         eventId,
+        crmCustomerId: 'crm-customer-id',
         firstName: 'Ada',
         lastName: 'Lovelace',
         status: RegistrationStatus.CONFIRMED,
+        event: { title: 'Academy Open Day' },
       },
     });
 
@@ -104,6 +108,16 @@ describe('CheckInsService', () => {
     expect(transaction.ticket.update).toHaveBeenCalledWith({
       where: { id: 'ticket-id' },
       data: { status: TicketStatus.CHECKED_IN },
+    });
+    expect(transaction.crmCustomerActivity.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        customerId: 'crm-customer-id',
+        eventId,
+        actorId: staffId,
+        type: 'CHECKED_IN',
+        summary: 'Checked in to Academy Open Day',
+        sourceKey: 'check-in:check-in-id',
+      }),
     });
     expect(result.success).toBe(true);
   });

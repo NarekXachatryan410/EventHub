@@ -6,11 +6,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { CrmActivityType, CrmCustomerStatus, CrmReminderStatus, Prisma, UserRole } from '@prisma/client';
+import { EmailType } from '@prisma/client';
 import type { AuthUser } from '../auth/auth.types.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { CreateCrmCustomerDto } from './dto/create-crm-customer.dto.js';
 import type { ListCrmCustomersDto } from './dto/list-crm-customers.dto.js';
 import type { UpdateCrmCustomerDto } from './dto/update-crm-customer.dto.js';
+import type { CrmRegistrationQueryDto } from './dto/crm-management.dto.js';
 
 type RegistrationCustomerInput = {
   organizerId: string;
@@ -35,7 +37,9 @@ export class CrmService {
     const sortBy = query.sortBy ?? 'createdAt';
     const terms = query.search?.trim().split(/\s+/).filter(Boolean) ?? [];
     const where: Prisma.CrmCustomerWhereInput = {
-      ...(user.role === UserRole.SUPER_ADMIN ? {} : { organizerId: user.sub }),
+      ...(user.role === UserRole.SUPER_ADMIN
+        ? (query.organizerId ? { organizerId: query.organizerId } : {})
+        : { organizerId: user.sub }),
       ...(query.status ? { status: query.status } : {}),
       ...(query.tagId ? { tags: { some: { tagId: query.tagId } } } : {}),
       ...(terms.length
@@ -115,6 +119,50 @@ export class CrmService {
     });
     if (!customer) throw new NotFoundException('CRM customer not found');
     return customer;
+  }
+
+  async listCustomerRegistrations(user: AuthUser, customerId: string, query: CrmRegistrationQueryDto) {
+    await this.getCustomerIdentity(user, customerId);
+    const rows = await this.prisma.eventRegistration.findMany({
+      where: { crmCustomerId: customerId },
+      ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
+      orderBy: [{ registeredAt: 'desc' }, { id: 'desc' }],
+      take: query.limit + 1,
+      select: {
+        id: true, eventId: true, registeredAt: true, status: true,
+        event: { select: { title: true, startDate: true, status: true } },
+        ticket: { select: { status: true, checkIn: { select: { checkedInAt: true } } } },
+      },
+    });
+    return page(rows, query.limit);
+  }
+
+  async dashboardAnalytics(user: AuthUser) {
+    this.assertAuthorized(user);
+    const organizerFilter: Prisma.CrmCustomerWhereInput = user.role === UserRole.SUPER_ADMIN ? {} : { organizerId: user.sub };
+    const registrationCustomerFilter: Prisma.EventRegistrationWhereInput = user.role === UserRole.SUPER_ADMIN
+      ? { crmCustomerId: { not: null } }
+      : { crmCustomer: { is: { organizerId: user.sub } } };
+    const now = new Date();
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const monthRanges = Array.from({ length: 12 }, (_, index) => {
+      const start = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() - 11 + index, 1));
+      const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1));
+      return { start, end };
+    });
+    const [totalCustomers, activeCustomers, archivedCustomers, registeredCustomers, registrations, createdThisMonth, customerGrowth] = await Promise.all([
+      this.prisma.crmCustomer.count({ where: organizerFilter }),
+      this.prisma.crmCustomer.count({ where: { ...organizerFilter, status: CrmCustomerStatus.ACTIVE } }),
+      this.prisma.crmCustomer.count({ where: { ...organizerFilter, status: CrmCustomerStatus.ARCHIVED } }),
+      this.prisma.crmCustomer.count({ where: { ...organizerFilter, registrations: { some: {} } } }),
+      this.prisma.eventRegistration.count({ where: registrationCustomerFilter }),
+      this.prisma.crmCustomer.count({ where: { ...organizerFilter, createdAt: { gte: monthStart } } }),
+      Promise.all(monthRanges.map(({ start, end }) => this.prisma.crmCustomer.count({ where: { ...organizerFilter, createdAt: { gte: start, lt: end } } }))),
+    ]);
+    return {
+      totalCustomers, activeCustomers, archivedCustomers, registeredCustomers, registrations, createdThisMonth,
+      customerGrowth: monthRanges.map(({ start }, index) => ({ month: start.toISOString(), customers: customerGrowth[index] ?? 0 })),
+    };
   }
 
   async createCustomer(user: AuthUser, input: CreateCrmCustomerDto) {
@@ -352,20 +400,48 @@ export class CrmService {
   async listActivity(user: AuthUser, customerId: string, limit: number, cursor?: string) {
     await this.getCustomerIdentity(user, customerId);
     const before = decodeTimelineCursor(cursor);
-    const activity = await this.prisma.crmCustomerActivity.findMany({ where: { customerId, ...(before ? { occurredAt: { lt: before } } : {}) }, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], take: limit + 1, include: { actor: { select: { id: true, firstName: true, lastName: true } }, event: { select: { id: true, title: true } } } });
-    const notes = await this.prisma.crmCustomerNote.findMany({ where: { customerId, ...(before ? { createdAt: { lt: before } } : {}) }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: limit + 1, include: { author: { select: { id: true, firstName: true, lastName: true } } } });
-    const reminders = await this.prisma.crmCustomerReminder.findMany({ where: { customerId, ...(before ? { createdAt: { lt: before } } : {}) }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: limit + 1 });
-    const registrationEvents = await this.prisma.eventRegistration.findMany({ where: { crmCustomerId: customerId, ...(before ? { registeredAt: { lt: before } } : {}) }, orderBy: [{ registeredAt: 'desc' }, { id: 'desc' }], take: limit + 1, select: { id: true, eventId: true, registeredAt: true, status: true, event: { select: { title: true } } } });
-    const checkIns = await this.prisma.checkIn.findMany({ where: { ticket: { registration: { crmCustomerId: customerId } }, ...(before ? { checkedInAt: { lt: before } } : {}) }, orderBy: [{ checkedInAt: 'desc' }, { id: 'desc' }], take: limit + 1, select: { id: true, checkedInAt: true, staff: { select: { id: true, firstName: true, lastName: true } }, ticket: { select: { registration: { select: { event: { select: { id: true, title: true } } } } } } } });
-    const entries = [
-      ...activity.map((item) => ({ id: `activity:${item.id}`, type: item.type, summary: item.summary, occurredAt: item.occurredAt, actor: item.actor, event: item.event, metadata: item.metadata })),
+    const [activity, notes, reminders, checkIns, emails] = await Promise.all([
+      this.prisma.crmCustomerActivity.findMany({
+        where: { customerId, type: { notIn: [CrmActivityType.NOTE_ADDED, CrmActivityType.REMINDER_CREATED, CrmActivityType.REMINDER_COMPLETED, CrmActivityType.CHECKED_IN] }, ...timelineDateWhere('occurredAt', 'activity', before) },
+        orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], take: limit + 1,
+        include: { actor: { select: { id: true, firstName: true, lastName: true } }, event: { select: { id: true, title: true } } },
+      }),
+      this.prisma.crmCustomerNote.findMany({
+        where: { customerId, ...timelineDateWhere('createdAt', 'note', before) },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: limit + 1,
+        include: { author: { select: { id: true, firstName: true, lastName: true } } },
+      }),
+      this.prisma.crmCustomerReminder.findMany({
+        where: { customerId, ...timelineDateWhere('updatedAt', 'reminder', before) },
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], take: limit + 1,
+      }),
+      this.prisma.checkIn.findMany({
+        where: { ticket: { registration: { crmCustomerId: customerId } }, ...timelineDateWhere('checkedInAt', 'checkin', before) },
+        orderBy: [{ checkedInAt: 'desc' }, { id: 'desc' }], take: limit + 1,
+        select: { id: true, checkedInAt: true, staff: { select: { id: true, firstName: true, lastName: true } }, ticket: { select: { registration: { select: { event: { select: { id: true, title: true } } } } } } },
+      }),
+      this.prisma.emailLog.findMany({
+        where: { registration: { is: { crmCustomerId: customerId } }, ...timelineDateWhere('scheduledAt', 'email', before) },
+        orderBy: [{ scheduledAt: 'desc' }, { id: 'desc' }], take: limit + 1,
+        select: { id: true, type: true, status: true, providerId: true, errorMessage: true, scheduledAt: true, lastAttemptAt: true, sentAt: true },
+      }),
+    ]);
+    const entries: TimelineEntry[] = [
+      ...activity.map((item) => ({ id: `activity:${item.id}`, type: item.type, summary: item.summary, occurredAt: item.occurredAt, actor: item.actor, event: item.event, metadata: jsonObject(item.metadata) })),
       ...notes.map((item) => ({ id: `note:${item.id}`, type: CrmActivityType.NOTE_ADDED, summary: 'Note added', occurredAt: item.createdAt, actor: item.author, metadata: { noteId: item.id, content: item.content } })),
-      ...reminders.map((item) => ({ id: `reminder:${item.id}`, type: item.status === CrmReminderStatus.COMPLETED ? CrmActivityType.REMINDER_COMPLETED : CrmActivityType.REMINDER_CREATED, summary: `Reminder ${item.status.toLowerCase()}: ${item.title}`, occurredAt: item.updatedAt, metadata: { reminderId: item.id, dueAt: item.dueAt, status: item.status } })),
-      ...registrationEvents.map((item) => ({ id: `registration:${item.id}`, type: CrmActivityType.REGISTRATION_CREATED, summary: `Registered for ${item.event.title}`, occurredAt: item.registeredAt, event: { id: item.eventId, title: item.event.title }, metadata: { registrationId: item.id, status: item.status } })),
-      ...checkIns.map((item) => ({ id: `checkin:${item.id}`, type: CrmActivityType.CHECKED_IN, summary: `Checked in to ${item.ticket.registration.event.title}`, occurredAt: item.checkedInAt, actor: item.staff, event: item.ticket.registration.event, metadata: {} })),
+      ...reminders.map((item) => ({ id: `reminder:${item.id}`, type: item.status === CrmReminderStatus.COMPLETED ? CrmActivityType.REMINDER_COMPLETED : CrmActivityType.REMINDER_CREATED, summary: `Reminder ${item.status.toLowerCase()}: ${item.title}`, occurredAt: item.updatedAt, metadata: { reminderId: item.id, dueAt: item.dueAt.toISOString(), status: item.status } })),
+      ...checkIns.map((item) => ({ id: `checkin:${item.id}`, type: CrmActivityType.CHECKED_IN, summary: `Checked in to ${item.ticket.registration.event.title}`, occurredAt: item.checkedInAt, actor: item.staff, event: item.ticket.registration.event, metadata: { checkInId: item.id } })),
+      ...emails.map((item) => ({
+        id: `email:${item.id}`,
+        type: CrmActivityType.COMMUNICATION_RECORDED,
+        summary: `${emailTypeLabel(item.type)} · ${item.status.toLowerCase().replaceAll('_', ' ')}`,
+        occurredAt: item.scheduledAt,
+        metadata: { emailLogId: item.id, emailType: item.type, emailStatus: item.status, providerId: item.providerId, errorMessage: item.errorMessage, sentAt: item.sentAt?.toISOString() ?? null, lastAttemptAt: item.lastAttemptAt?.toISOString() ?? null },
+      })),
     ].sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime() || b.id.localeCompare(a.id));
-    const items = entries.slice(0, limit);
-    return { items, nextCursor: entries.length > limit ? encodeTimelineCursor(items.at(-1)!.occurredAt) : null };
+    const unique = dedupeTimeline(entries);
+    const items = unique.slice(0, limit);
+    return { items, nextCursor: unique.length > limit ? encodeTimelineCursor(items.at(-1)!.occurredAt, items.at(-1)!.id) : null };
   }
 
   async previewSegment(user: AuthUser, criteria: SegmentCriteria, organizerId?: string) {
@@ -392,24 +468,39 @@ export class CrmService {
     return Promise.all(segments.map(async (segment) => {
       const criteria = segment.criteria as unknown as SegmentCriteria;
       const where = await this.segmentWhere(scopedOrganizer, criteria);
-      const matching = await this.prisma.crmCustomer.findMany({ where, select: { id: true } });
-      await this.prisma.$transaction(async (tx) => {
-        await tx.crmCustomerSegmentMembership.deleteMany({ where: { segmentId: segment.id } });
-        if (matching.length) {
-          await tx.crmCustomerSegmentMembership.createMany({
-            data: matching.map(({ id }) => ({ segmentId: segment.id, customerId: id })),
-            skipDuplicates: true,
-          });
-        }
-      });
-      const ids = matching.slice(0, 100).map(({ id }) => id);
-      const members = ids.length ? await this.prisma.crmCustomer.findMany({
-        where: { id: { in: ids } },
-        select: { id: true, email: true, firstName: true, lastName: true, status: true, _count: { select: { registrations: true } } },
-        orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }, { id: 'asc' }],
-      }) : [];
-      return { ...segment, total: matching.length, items: members };
+      const [total, members] = await Promise.all([
+        this.prisma.crmCustomer.count({ where }),
+        this.prisma.crmCustomer.findMany({
+          where,
+          select: { id: true, email: true, firstName: true, lastName: true, status: true, _count: { select: { registrations: true } } },
+          orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }, { id: 'asc' }],
+          take: 26,
+        }),
+      ]);
+      const memberPage = page(members, 25);
+      return { ...segment, total, items: memberPage.items, membersNextCursor: memberPage.nextCursor };
     }));
+  }
+
+  async listSegmentMembers(user: AuthUser, segmentId: string, query: CrmRegistrationQueryDto) {
+    this.assertAuthorized(user);
+    const segment = await this.prisma.crmCustomerSegment.findFirst({
+      where: { id: segmentId, ...(user.role === UserRole.SUPER_ADMIN ? {} : { organizerId: user.sub }) },
+      select: { id: true, organizerId: true, criteria: true },
+    });
+    if (!segment) throw new NotFoundException('CRM segment not found');
+    const where = await this.segmentWhere(segment.organizerId, segment.criteria as unknown as SegmentCriteria);
+    const [total, rows] = await Promise.all([
+      this.prisma.crmCustomer.count({ where }),
+      this.prisma.crmCustomer.findMany({
+        where,
+        ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
+        orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }, { id: 'asc' }],
+        take: query.limit + 1,
+        select: { id: true, organizerId: true, email: true, firstName: true, lastName: true, status: true, createdAt: true, _count: { select: { registrations: true } } },
+      }),
+    ]);
+    return { ...page(rows, query.limit), total };
   }
 
   async deleteSegment(user: AuthUser, segmentId: string) {
@@ -501,6 +592,9 @@ export class CrmService {
       },
       update: {
         status: CrmCustomerStatus.ACTIVE,
+        firstName: input.firstName.trim(),
+        lastName: input.lastName.trim(),
+        ...(input.phone ? { phone: input.phone } : {}),
         ...(input.marketingConsent
           ? {
               marketingConsent: true,
@@ -573,6 +667,17 @@ export function normalizeCustomerEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+type TimelineCursor = { occurredAt: Date; id: string };
+type TimelineEntry = {
+  id: string;
+  type: CrmActivityType;
+  summary: string;
+  occurredAt: Date;
+  actor?: { id: string; firstName: string; lastName: string } | null;
+  event?: { id: string; title: string } | null;
+  metadata?: Record<string, unknown> | null;
+};
+
 type SegmentCriteria = {
   status?: CrmCustomerStatus;
   registeredAfter?: string;
@@ -598,19 +703,68 @@ function page<T extends { id: string }>(rows: T[], limit: number) {
   return { items, nextCursor: hasMore ? items.at(-1)?.id ?? null : null };
 }
 
-function encodeTimelineCursor(date: Date): string {
-  return Buffer.from(date.toISOString()).toString('base64url');
+function encodeTimelineCursor(date: Date, id: string): string {
+  return Buffer.from(JSON.stringify({ occurredAt: date.toISOString(), id })).toString('base64url');
 }
 
-function decodeTimelineCursor(cursor?: string): Date | undefined {
+function decodeTimelineCursor(cursor?: string): TimelineCursor | undefined {
   if (!cursor) return undefined;
   try {
-    const date = new Date(Buffer.from(cursor, 'base64url').toString('utf8'));
-    if (!Number.isFinite(date.getTime())) throw new Error('Invalid cursor');
-    return date;
+    const decoded = Buffer.from(cursor, 'base64url').toString('utf8');
+    let parsed: unknown;
+    try { parsed = JSON.parse(decoded); } catch { parsed = undefined; }
+    if (typeof parsed === 'object' && parsed !== null && 'occurredAt' in parsed && 'id' in parsed) {
+      const value = parsed as { occurredAt: unknown; id: unknown };
+      const occurredAt = new Date(String(value.occurredAt));
+      if (!Number.isFinite(occurredAt.getTime()) || typeof value.id !== 'string' || !value.id.includes(':')) throw new Error('Invalid cursor');
+      return { occurredAt, id: value.id };
+    }
+    // Accept the previous timestamp-only cursor for clients that still hold one.
+    const occurredAt = new Date(decoded);
+    if (!Number.isFinite(occurredAt.getTime())) throw new Error('Invalid cursor');
+    return { occurredAt, id: 'zzzz:' };
   } catch {
     throw new BadRequestException('Invalid activity cursor');
   }
+}
+
+function timelineDateWhere(field: string, prefix: string, cursor?: TimelineCursor): Record<string, unknown> {
+  if (!cursor) return {};
+  const separator = cursor.id.indexOf(':');
+  const cursorPrefix = cursor.id.slice(0, separator);
+  const cursorRawId = cursor.id.slice(separator + 1);
+  const sameDateKeyCondition = prefix.localeCompare(cursorPrefix) < 0
+    ? { [field]: cursor.occurredAt }
+    : prefix === cursorPrefix
+      ? { [field]: cursor.occurredAt, id: { lt: cursorRawId } }
+      : null;
+  return {
+    OR: [
+      { [field]: { lt: cursor.occurredAt } },
+      ...(sameDateKeyCondition ? [sameDateKeyCondition] : []),
+    ],
+  };
+}
+
+function dedupeTimeline(entries: TimelineEntry[]): TimelineEntry[] {
+  const seen = new Set<string>();
+  return entries.filter((entry) => {
+    const metadata = entry.metadata;
+    const sourceId = metadata?.noteId ?? metadata?.reminderId ?? metadata?.registrationId ?? metadata?.checkInId;
+    const key = typeof sourceId === 'string' ? `${entry.type}:${sourceId}` : entry.id;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function jsonObject(value: Prisma.JsonValue | null): Record<string, unknown> | null {
+  if (!value || Array.isArray(value) || typeof value !== 'object') return null;
+  return value as Record<string, unknown>;
+}
+
+function emailTypeLabel(type: EmailType): string {
+  return type.toLowerCase().replaceAll('_', ' ');
 }
 
 function normalizeOptional(value: string | null | undefined): string | null {

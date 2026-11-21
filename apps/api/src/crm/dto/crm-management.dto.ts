@@ -77,6 +77,11 @@ export class CrmActivityQueryDto {
   @IsOptional() @IsString() @MaxLength(256) cursor?: string;
 }
 
+export class CrmRegistrationQueryDto {
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit = 25;
+  @IsOptional() @IsUUID('4') cursor?: string;
+}
+
 export class CrmOrganizerQueryDto {
   @IsOptional() @IsUUID('4') organizerId?: string;
 }

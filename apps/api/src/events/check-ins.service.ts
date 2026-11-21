@@ -123,9 +123,11 @@ export class CheckInsService {
             select: {
               id: true,
               eventId: true,
+              crmCustomerId: true,
               firstName: true,
               lastName: true,
               status: true,
+              event: { select: { title: true } },
             },
           },
         },
@@ -160,6 +162,20 @@ export class CheckInsService {
         where: { id: ticket.id },
         data: { status: TicketStatus.CHECKED_IN },
       });
+      if (ticket.registration.crmCustomerId) {
+        await transaction.crmCustomerActivity.create({
+          data: {
+            customerId: ticket.registration.crmCustomerId,
+            eventId: ticket.registration.eventId,
+            actorId: user.sub,
+            type: 'CHECKED_IN',
+            summary: `Checked in to ${ticket.registration.event.title}`,
+            metadata: { checkInId: checkedIn.id },
+            sourceKey: `check-in:${checkedIn.id}`,
+            occurredAt: checkedIn.checkedInAt,
+          },
+        });
+      }
       return {
         success: true,
         checkedInAt: checkedIn.checkedInAt,

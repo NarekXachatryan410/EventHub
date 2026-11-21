@@ -286,6 +286,18 @@ export class RegistrationsService {
         where: { id: registration.id },
         data: { status: RegistrationStatus.CANCELLED },
       });
+      if (registration.crmCustomerId) {
+        await transaction.crmCustomerActivity.create({
+          data: {
+            customerId: registration.crmCustomerId,
+            eventId: registration.eventId,
+            type: 'TICKET_CANCELLED',
+            summary: `Registration cancelled for ${registration.event.title}`,
+            metadata: { registrationId: registration.id },
+            sourceKey: `registration-cancelled:${registration.id}`,
+          },
+        });
+      }
       if (registration.ticket) {
         await transaction.ticket.update({
           where: { id: registration.ticket.id },

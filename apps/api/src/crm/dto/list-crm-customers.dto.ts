@@ -38,6 +38,10 @@ export class ListCrmCustomersDto {
   tagId?: string;
 
   @IsOptional()
+  @IsUUID('4')
+  organizerId?: string;
+
+  @IsOptional()
   @IsIn(['createdAt', 'name'])
   sortBy: 'createdAt' | 'name' = 'createdAt';
 

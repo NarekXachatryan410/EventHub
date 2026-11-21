@@ -69,6 +69,7 @@ export type CrmSegment = {
   description: string | null;
   criteria: CrmSegmentCriteria;
   total: number;
+  membersNextCursor: string | null;
   items: Pick<CrmCustomer, "id" | "email" | "firstName" | "lastName" | "status">[];
 };
 export type CrmPage<T> = { items: T[]; nextCursor: string | null };
@@ -76,6 +77,8 @@ export type StaffOrganizer = { id: string; firstName: string; lastName: string; 
 
 export const crmApi = {
   listCustomers: (params: Record<string, string | number | undefined>) => staffApi<CrmCustomerPage>(`/crm/customers?${query(params)}`),
+  dashboardAnalytics: () => staffApi<{ totalCustomers: number; activeCustomers: number; archivedCustomers: number; registeredCustomers: number; registrations: number; createdThisMonth: number; customerGrowth: { month: string; customers: number }[] }>("/crm/analytics/dashboard"),
+  listCustomerRegistrations: (customerId: string, cursor?: string) => staffApi<CrmPage<CrmRegistration>>(`/crm/customers/${customerId}/registrations?${query({ limit: 25, cursor })}`),
   getCustomer: (id: string) => staffApi<CrmCustomerProfile>(`/crm/customers/${id}`),
   createCustomer: (input: { email: string; firstName: string; lastName: string; phone?: string; birthday?: string; organizerId?: string }) => staffApi<CrmCustomer>("/crm/customers", { method: "POST", body: JSON.stringify(input) }),
   updateCustomer: (id: string, input: Partial<Pick<CrmCustomer, "email" | "firstName" | "lastName" | "phone" | "birthday" | "status">>) => staffApi<CrmCustomer>(`/crm/customers/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
@@ -95,6 +98,7 @@ export const crmApi = {
   completeReminder: (customerId: string, reminderId: string) => staffApi<CrmReminder>(`/crm/customers/${customerId}/reminders/${reminderId}/complete`, { method: "POST" }),
   deleteReminder: (customerId: string, reminderId: string) => staffApi<{ success: boolean }>(`/crm/customers/${customerId}/reminders/${reminderId}`, { method: "DELETE" }),
   listSegments: (organizerId?: string) => staffApi<CrmSegment[]>(`/crm/segments?${query({ organizerId })}`),
+  listSegmentMembers: (segmentId: string, cursor?: string) => staffApi<{ items: CrmSegment["items"]; total: number; nextCursor: string | null }>(`/crm/segments/${segmentId}/members?${query({ limit: 25, cursor })}`),
   previewSegment: (criteria: CrmSegmentCriteria, organizerId?: string) => staffApi<{ total: number; items: CrmCustomer[] }>("/crm/segments/preview", { method: "POST", body: JSON.stringify({ criteria, organizerId }) }),
   saveSegment: (name: string, criteria: CrmSegmentCriteria, organizerId?: string) => staffApi<CrmSegment>("/crm/segments", { method: "POST", body: JSON.stringify({ name, criteria, organizerId }) }),
   deleteSegment: (id: string) => staffApi<{ success: boolean }>(`/crm/segments/${id}`, { method: "DELETE" }),

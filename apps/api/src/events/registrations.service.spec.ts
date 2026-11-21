@@ -18,7 +18,10 @@ describe('RegistrationsService', () => {
       create: jest.Mock;
       update: jest.Mock;
       findUnique: jest.Mock;
+      findFirst: jest.Mock;
     };
+    crmCustomerActivity: { create: jest.Mock };
+    emailLog: { updateMany: jest.Mock };
   };
   let emailQueue: {
     createOutboxEntry: jest.Mock;
@@ -70,7 +73,10 @@ describe('RegistrationsService', () => {
         })),
         update: jest.fn().mockResolvedValue({}),
         findUnique: jest.fn().mockResolvedValue(null),
+        findFirst: jest.fn().mockResolvedValue(null),
       },
+      crmCustomerActivity: { create: jest.fn().mockResolvedValue({}) },
+      emailLog: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
     };
     transaction.event.findUnique.mockResolvedValue(registrationEvent());
 
@@ -137,6 +143,56 @@ describe('RegistrationsService', () => {
       ),
     ).toHaveLength(2);
     expect(emailQueue.dispatchLog).toHaveBeenCalledWith('email-log-id');
+  });
+
+  it('records cancellation activity on the linked CRM customer in the cancellation transaction', async () => {
+    const cancellationToken = 'registration-cancellation-token';
+    transaction.eventRegistration.findUnique.mockResolvedValue({
+      id: registrationId,
+      crmCustomerId: 'crm-customer-id',
+      eventId,
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      email: 'ada@example.com',
+      status: RegistrationStatus.CONFIRMED,
+      cancellationTokenHash: createHash('sha256').update(cancellationToken).digest('hex'),
+      ticket: null,
+      event: {
+        id: eventId,
+        organizerId: 'organizer-id',
+        slug: 'academy-open-day',
+        title: 'Academy Open Day',
+        location: 'Main campus',
+        startDate: new Date('2030-05-10T09:00:00.000Z'),
+        status: EventStatus.COMPLETED,
+        registrationEnabled: false,
+        registrationDeadline: new Date('2030-05-09T09:00:00.000Z'),
+        maxAttendees: 10,
+        reminderOffsetsHours: [24],
+        registrationQuestions: null,
+        allowSelfCancellation: true,
+      },
+    });
+
+    await service.cancelByToken(registrationId, { cancellationToken });
+
+    expect(transaction.crmCustomerActivity.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        customerId: 'crm-customer-id',
+        eventId,
+        type: 'TICKET_CANCELLED',
+        summary: 'Registration cancelled for Academy Open Day',
+        sourceKey: `registration-cancelled:${registrationId}`,
+      }),
+    });
+    expect(transaction.eventRegistration.update).toHaveBeenCalledWith({
+      where: { id: registrationId },
+      data: { status: RegistrationStatus.CANCELLED },
+    });
+    expect(emailQueue.createOutboxEntry).toHaveBeenCalledWith(
+      transaction,
+      expect.objectContaining({ type: EmailType.REGISTRATION_CANCELLATION }),
+    );
   });
 
   it('adds a registrant to the waitlist when the event is full and requested', async () => {

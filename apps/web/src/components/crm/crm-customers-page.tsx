@@ -32,19 +32,19 @@ export function CrmCustomersPage() {
   const cursor = cursorStack.at(-1);
   useEffect(() => {
     let active = true;
-    crmApi.listCustomers({ limit: 25, cursor, search: search || undefined, status: status || undefined, tagId: tagId || undefined, sortBy, sortOrder })
+    crmApi.listCustomers({ limit: 25, cursor, search: search || undefined, status: status || undefined, tagId: tagId || undefined, sortBy, sortOrder, organizerId: scope.user?.role === "SUPER_ADMIN" ? scope.organizerId : undefined })
       .then((result) => { if (active) setPage(result); })
       .catch((loadError: unknown) => { if (active) setError(loadError instanceof Error ? loadError.message : "Could not load customers."); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [cursor, search, status, tagId, sortBy, sortOrder, reload]);
+  }, [cursor, search, status, tagId, sortBy, sortOrder, reload, scope.organizerId, scope.user?.role]);
 
   function resetFilters() { setCursorStack([undefined]); setSearch(""); setSearchText(""); setStatus(""); setTagId(""); }
 
   return <main>
     <CrmHeader eyebrow="Customer relationships" title="Customers" description="Search and manage organizer customer profiles, registration relationships, and follow-ups." action={<button className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700" onClick={() => setCreateOpen(true)} type="button"><Plus aria-hidden="true" className="size-4" />Add customer</button>} />
     {scope.error && <CrmError message={scope.error} />}
-    {scope.user?.role === "SUPER_ADMIN" && <div className="mt-5"><OrganizerPicker organizers={scope.organizers} value={scope.organizerId} onChange={(value) => { scope.setOrganizerId(value); setTagId(""); }} disabled={scope.loading} /></div>}
+    {scope.user?.role === "SUPER_ADMIN" && <div className="mt-5"><OrganizerPicker organizers={scope.organizers} value={scope.organizerId} onChange={(value) => { setLoading(true); setCursorStack([undefined]); scope.setOrganizerId(value); setTagId(""); }} disabled={scope.loading} /><p className="mt-1 text-xs text-slate-500">Filters the customer list and available tags to the selected organizer.</p></div>}
     {error && <CrmError message={error} onRetry={() => setReload((value) => value + 1)} />}
     <section aria-label="Customer filters" className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
       <form className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(240px,1fr)_180px_200px_170px_auto]" onSubmit={(event: FormEvent) => { event.preventDefault(); setLoading(true); setError(null); setCursorStack([undefined]); setSearch(searchText.trim()); }}>
