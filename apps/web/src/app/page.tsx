@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { publicApiBaseUrl } from "@/lib/api";
 
 export default function Home() {
   return (
@@ -38,12 +37,6 @@ export default function Home() {
           >
             Browse events
           </Link>
-          <a
-            className="rounded-lg border border-stone-300 bg-white px-5 py-3 text-sm font-medium text-stone-700 transition hover:bg-stone-100"
-            href={`${publicApiBaseUrl}/api/docs`}
-          >
-            API documentation
-          </a>
         </div>
       </section>
       <footer className="mx-auto w-full max-w-6xl px-6 py-6 text-sm text-stone-500">
