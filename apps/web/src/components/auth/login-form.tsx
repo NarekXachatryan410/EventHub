@@ -4,12 +4,15 @@ import {
   ArrowRight,
   CalendarDays,
   Check,
+  ContactRound,
   Eye,
   EyeOff,
   KeyRound,
   LoaderCircle,
   LockKeyhole,
+  MailCheck,
   Mail,
+  QrCode,
   Sparkles,
 } from "lucide-react";
 import Link from "next/link";
@@ -125,8 +128,8 @@ export function LoginForm() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f5f6fa] lg:grid lg:grid-cols-[1.04fr_0.96fr]">
-      <section className="relative hidden min-h-screen overflow-hidden bg-[#11152d] px-12 py-10 text-white lg:flex lg:flex-col xl:px-16">
+    <main className="eh-login min-h-screen bg-[#f5f6fa] lg:grid lg:grid-cols-[1.04fr_0.96fr]">
+      <section className="eh-login-hero relative hidden min-h-screen overflow-hidden bg-[#11152d] px-12 py-10 text-white lg:flex lg:flex-col xl:px-16">
         <div
           aria-hidden="true"
           className="pointer-events-none absolute -left-40 top-32 h-96 w-96 rounded-full bg-indigo-500/25 blur-3xl"
@@ -158,33 +161,20 @@ export function LoginForm() {
           </p>
 
           <div className="mt-12 rounded-3xl border border-white/10 bg-white/[0.07] p-5 shadow-2xl shadow-black/20 backdrop-blur">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-sm text-slate-300">Your next event</p>
-                <h2 className="mt-1 text-lg font-semibold">Academy Open Day</h2>
-              </div>
-              <span className="rounded-full bg-emerald-300/15 px-3 py-1 text-xs font-medium text-emerald-200">
-                Published
-              </span>
-            </div>
-            <div className="mt-5 grid grid-cols-3 gap-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-200">One connected workflow</p>
+            <h2 className="mt-2 text-lg font-semibold">From registration to follow-up</h2>
+            <div className="mt-4 divide-y divide-white/10">
               {[
-                ["Registration", "Open"],
-                ["Attendees", "128"],
-                ["Check-in", "Ready"],
-              ].map(([label, value]) => (
-                <div
-                  className="rounded-2xl bg-[#11152d]/55 p-3"
-                  key={label}
-                >
-                  <p className="text-xs text-slate-400">{label}</p>
-                  <p className="mt-1 font-medium text-white">{value}</p>
+                { icon: MailCheck, title: "Attendee registration", detail: "Forms, confirmations, and reminders" },
+                { icon: QrCode, title: "Event-day check-in", detail: "Private QR tickets and fast validation" },
+                { icon: ContactRound, title: "Customer relationships", detail: "Profiles, notes, tags, and activity" },
+              ].map(({ icon: Icon, title, detail }) => (
+                <div className="flex items-center gap-3 py-3.5" key={title}>
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-white/10 text-indigo-100"><Icon aria-hidden="true" className="size-4" /></span>
+                  <div className="min-w-0 flex-1"><p className="text-sm font-medium text-white">{title}</p><p className="mt-0.5 text-xs text-slate-400">{detail}</p></div>
+                  <Check aria-hidden="true" className="size-4 shrink-0 text-emerald-300" />
                 </div>
               ))}
-            </div>
-            <div className="mt-5 flex items-center gap-2 text-sm text-indigo-100">
-              <Check aria-hidden="true" className="size-4 text-emerald-300" />
-              One place for every part of your event
             </div>
           </div>
         </div>
