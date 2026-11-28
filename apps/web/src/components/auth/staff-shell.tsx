@@ -153,7 +153,7 @@ export function useStaffUser(): StaffUser | null {
 
 export function StaffShell({ children }: { children: ReactNode }) {
   return (
-    <Suspense fallback={<main className="flex min-h-screen items-center justify-center bg-[#f5f6fa] px-5"><p className="rounded-2xl border border-slate-200 bg-white px-6 py-5 text-sm text-slate-600 shadow-sm" role="status">Loading your secure workspace…</p></main>}>
+    <Suspense fallback={<main className="eh-auth-state flex min-h-screen items-center justify-center px-5"><p className="rounded-2xl border border-slate-200 px-6 py-5 text-sm text-slate-600 shadow-sm" role="status">Loading your secure workspace…</p></main>}>
       <StaffWorkspace>{children}</StaffWorkspace>
     </Suspense>
   );
@@ -239,8 +239,8 @@ function StaffWorkspace({ children }: { children: ReactNode }) {
 
   if (loading) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#f5f6fa] px-5">
-        <p className="rounded-2xl border border-slate-200 bg-white px-6 py-5 text-sm text-slate-600 shadow-sm" role="status">
+      <main className="eh-auth-state flex min-h-screen items-center justify-center px-5">
+        <p className="rounded-2xl border border-slate-200 px-6 py-5 text-sm text-slate-600 shadow-sm" role="status">
           Verifying your secure workspace…
         </p>
       </main>
@@ -249,7 +249,7 @@ function StaffWorkspace({ children }: { children: ReactNode }) {
 
   if (!user) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#f5f6fa] px-5">
+      <main className="eh-auth-state flex min-h-screen items-center justify-center px-5">
         <section className="max-w-md rounded-2xl border border-red-200 bg-white p-7 text-center shadow-sm">
           <Shield aria-hidden="true" className="mx-auto size-8 text-red-600" />
           <h1 className="mt-4 text-lg font-semibold">Workspace unavailable</h1>
@@ -355,7 +355,7 @@ function StaffWorkspace({ children }: { children: ReactNode }) {
                 </button>
               </div>
             </div>
-            <div className={`eh-mobile-menu absolute inset-x-3 top-[calc(100%+0.5rem)] z-40 max-h-[calc(100vh-6rem)] overflow-y-auto rounded-2xl border p-3 shadow-xl lg:hidden ${mobileMenuOpen ? "block" : "hidden"}`} id="mobile-workspace-navigation">
+            <div className={`eh-mobile-menu absolute inset-x-3 top-[calc(100%+0.5rem)] z-40 max-h-[calc(100vh-6rem)] overflow-y-auto rounded-2xl border p-3 shadow-xl lg:hidden ${mobileMenuOpen ? "block" : "hidden"}`} id="mobile-workspace-navigation" onKeyDown={(event) => { if (event.key === "Escape") setMobileMenuOpen(false); }}>
                 <nav aria-label="Mobile staff workspace" className="space-y-4">
                   {navigationSections.map((group) => (
                     <div key={group.section}>

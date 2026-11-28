@@ -6,8 +6,8 @@ import { cn } from "@/lib/utils";
 const geist = localFont({ src: "../../public/fonts/geist-latin.woff2", variable: "--font-sans", display: "swap" });
 
 export const metadata: Metadata = {
-  title: "EventHub | Academy Events",
-  description: "Create and manage Academy events with EventHub.",
+  title: "EventHub | Event operations, connected",
+  description: "Plan events, welcome attendees, and keep every detail in view with EventHub.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
